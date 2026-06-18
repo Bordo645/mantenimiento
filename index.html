@@ -272,16 +272,20 @@
     if (!texto) { toast('⚠️ Escribí algo primero'); return; }
     const prioridad = document.getElementById('prioridad').value;
     document.getElementById('btnAgregar').disabled = true;
-    const { error } = await sb.from('notas').insert({ texto, prioridad, autor: usuario });
+    const { data, error } = await sb.from('notas').insert({ texto, prioridad, autor: usuario }).select().single();
     document.getElementById('btnAgregar').disabled = false;
     if (error) { toast('❌ Error guardando'); console.error(error); return; }
+    notas.unshift(data);
+    renderizar();
     document.getElementById('nuevaNota').value = '';
     toast('✓ Tarea agregada');
   }
 
   async function eliminarNota(id) {
     const { error } = await sb.from('notas').delete().eq('id', id);
-    if (error) toast('❌ Error eliminando');
+    if (error) { toast('❌ Error eliminando'); return; }
+    notas = notas.filter(n => n.id !== id);
+    renderizar();
   }
 
   async function guardarEdicion(id) {
@@ -291,7 +295,9 @@
     if (!nuevoTexto) return;
     const { error } = await sb.from('notas').update({ texto: nuevoTexto }).eq('id', id);
     if (error) { toast('❌ Error guardando'); return; }
+    notas = notas.map(n => n.id === id ? { ...n, texto: nuevoTexto } : n);
     editandoId = null;
+    renderizar();
     toast('✓ Nota actualizada');
   }
 
@@ -299,7 +305,9 @@
   function suscribirRealtime() {
     sb.channel('notas-cambios')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notas' }, (payload) => {
-        if (payload.eventType === 'INSERT') notas.unshift(payload.new);
+        if (payload.eventType === 'INSERT') {
+          if (!notas.find(n => n.id === payload.new.id)) notas.unshift(payload.new);
+        }
         else if (payload.eventType === 'DELETE') notas = notas.filter(n => n.id !== payload.old.id);
         else if (payload.eventType === 'UPDATE') notas = notas.map(n => n.id === payload.new.id ? payload.new : n);
         renderizar();
