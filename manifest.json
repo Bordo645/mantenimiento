@@ -1,0 +1,17 @@
+{
+  "name": "Mantenimiento BolsaPlast",
+  "short_name": "Mant. BP",
+  "description": "Gestión de tareas de mantenimiento",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1A1D21",
+  "theme_color": "#1A1D21",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='24' fill='%23E84040'/><text x='96' y='130' text-anchor='middle' font-family='Arial' font-weight='bold' font-size='80' fill='white'>BP</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}
