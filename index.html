@@ -152,6 +152,13 @@
     #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(60px); background:var(--bg-card); border:1px solid var(--border-light); border-radius:var(--radius); padding:10px 18px; font-size:13px; color:var(--text); z-index:300; transition:transform 0.25s ease; white-space:nowrap; }
     #toast.show { transform:translateX(-50%) translateY(0); }
 
+    /* IMÁGENES */
+    .img-gallery { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .img-thumb { width:56px; height:56px; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer; transition:opacity 0.15s; }
+    .img-thumb:hover { opacity:0.8; }
+    .img-lightbox { position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:400; display:flex; align-items:center; justify-content:center; padding:20px; cursor:zoom-out; }
+    .img-lightbox img { max-width:100%; max-height:100%; border-radius:8px; }
+
     /* RESPONSABLES */
     .resp-wrap { position:relative; display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap; }
     .resp-chip { font-size:10.5px; font-weight:600; font-family:'JetBrains Mono',monospace; padding:1px 6px; border-radius:3px; background:rgba(74,158,204,0.12); color:var(--baja); }
@@ -354,6 +361,21 @@ async function init() {
   suscribirRealtime();
 }
 
+// ── IMÁGENES ──
+function renderImagenes(imagenes) {
+  if (!imagenes || !imagenes.length) return '';
+  return `<div class="img-gallery">${imagenes.map(url =>
+    `<img class="img-thumb" src="${esc(url)}" onclick="event.stopPropagation();abrirLightbox('${esc(url)}')">`
+  ).join('')}</div>`;
+}
+function abrirLightbox(url) {
+  const box = document.createElement('div');
+  box.className = 'img-lightbox';
+  box.innerHTML = `<img src="${esc(url)}">`;
+  box.onclick = () => box.remove();
+  document.body.appendChild(box);
+}
+
 // ── RESPONSABLES (tareas y compras) ──
 function abrirAsignar(id) {
   asignandoId = (asignandoId === id) ? null : id;
@@ -482,6 +504,7 @@ function renderCard(nota, prioridad) {
         </div>
       </div>
       <div class="card-meta"><span class="card-author ${ac}">${esc(nota.autor)}</span><span class="card-date">${fd} ${fh}</span>${renderResponsables('notas', nota)}</div>
+      ${renderImagenes(nota.imagenes)}
     </div>`;
 }
 
