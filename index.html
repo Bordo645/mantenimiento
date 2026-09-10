@@ -152,6 +152,24 @@
     #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(60px); background:var(--bg-card); border:1px solid var(--border-light); border-radius:var(--radius); padding:10px 18px; font-size:13px; color:var(--text); z-index:300; transition:transform 0.25s ease; white-space:nowrap; }
     #toast.show { transform:translateX(-50%) translateY(0); }
 
+    /* AUTOR GENÉRICO (operarios) */
+    .author-op { color:var(--text-muted); background:rgba(255,255,255,0.06); }
+
+    /* ESTADO EN CURSO */
+    .estado-badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; margin-left:8px; text-transform:uppercase; letter-spacing:.4px; vertical-align:middle; }
+    .estado-badge.en-curso { background:rgba(74,158,204,0.15); color:var(--baja); }
+    .card-btn.iniciar:hover { border-color:var(--baja); color:var(--baja); }
+
+    /* DASHBOARD DE OPERARIOS */
+    .operarios-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
+    .operario-card { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--bg-card); }
+    .operario-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .operario-dot.libre { background:var(--verde); box-shadow:0 0 8px rgba(52,211,153,0.5); }
+    .operario-dot.ocupado { background:var(--alta); box-shadow:0 0 8px rgba(232,64,64,0.5); }
+    .operario-info { min-width:0; }
+    .operario-nombre { font-size:13px; font-weight:600; color:var(--text); }
+    .operario-tarea { font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
     /* IMÁGENES */
     .img-gallery { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
     .img-thumb { width:56px; height:56px; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer; transition:opacity 0.15s; }
@@ -194,10 +212,7 @@
   <div class="modal">
     <h2>👷 ¿Quién sos?</h2>
     <p>Elegí tu nombre para identificar las tareas que cargues.</p>
-    <div class="user-choice-btns">
-      <button class="btn-user-choice carlos" onclick="setUsuario('Carlos')">Carlos</button>
-      <button class="btn-user-choice alberto" onclick="setUsuario('Alberto')">Alberto</button>
-    </div>
+    <div class="user-choice-btns" id="userChoiceBtns"></div>
   </div>
 </div>
 
@@ -213,8 +228,7 @@
   <div class="header-right">
     <div id="clock"></div>
     <div class="user-selector">
-      <button class="user-btn" id="btnCarlos" onclick="cambiarUsuario('Carlos')">Carlos</button>
-      <button class="user-btn" id="btnAlberto" onclick="cambiarUsuario('Alberto')">Alberto</button>
+      <button class="user-btn active-op" id="btnUsuarioActual" onclick="document.getElementById('userModal').style.display='flex'">👷 Cambiar usuario</button>
     </div>
   </div>
 </header>
@@ -224,6 +238,7 @@
   <div class="tab active" onclick="mostrarTab('tareas')">🔧 Tareas</div>
   <div class="tab" onclick="mostrarTab('compras')">🛒 Compras</div>
   <div class="tab" onclick="mostrarTab('historial')">📋 Historial</div>
+  <div class="tab" onclick="mostrarTab('operarios')">👥 Operarios</div>
 </div>
 
 <main>
@@ -307,6 +322,11 @@
     </div>
   </div>
 
+  <!-- ── TAB OPERARIOS ── -->
+  <div class="tab-content" id="tab-operarios">
+    <div class="operarios-grid" id="operariosGrid"></div>
+  </div>
+
 </main>
 <div id="toast"></div>
 
@@ -318,6 +338,8 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let usuario = null;
 let notas = [], compras = [], historial = [];
 let asignandoId = null; // id del ítem con el popover de responsables abierto
+let iniciandoId = null; // id de la tarea con el popover de "poner en curso" abierto
+let iniciandoSeleccion = []; // operarios elegidos mientras el popover de inicio está abierto
 
 const OPERARIOS = ["Agustín","Fernando","Marcos","Juan","Ariel","Héctor","Rogelio","Leonel","Germán","Javier","Brian","Tomi","Carlos","Alberto"];
 let editandoId = null, editandoCompraId = null;
@@ -335,10 +357,28 @@ tick(); setInterval(tick, 1000);
 // TABS
 function mostrarTab(tab) {
   tabActual = tab;
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['tareas','compras','historial'][i]===tab));
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['tareas','compras','historial','operarios'][i]===tab));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
   if (tab==='historial') cargarHistorial();
+  if (tab==='operarios') renderizarOperarios();
+}
+
+function renderizarOperarios() {
+  const ocupados = {}; // nombre -> texto de la tarea en la que está
+  notas.filter(n => n.estado === 'en_curso').forEach(n => {
+    (n.responsables || []).forEach(op => { ocupados[op] = n.texto; });
+  });
+  document.getElementById('operariosGrid').innerHTML = OPERARIOS.map(op => {
+    const tarea = ocupados[op];
+    return `<div class="operario-card">
+      <div class="operario-dot ${tarea ? 'ocupado' : 'libre'}"></div>
+      <div class="operario-info">
+        <div class="operario-nombre">${esc(op)}</div>
+        <div class="operario-tarea">${tarea ? esc(tarea) : 'Disponible'}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // USUARIO
@@ -346,19 +386,55 @@ function setUsuario(nombre) {
   usuario = nombre;
   localStorage.setItem('usuario', nombre);
   ['usuarioActual','usuarioActualCompras'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=nombre; });
-  document.getElementById('btnCarlos').className = 'user-btn'+(nombre==='Carlos'?' active-carlos':'');
-  document.getElementById('btnAlberto').className = 'user-btn'+(nombre==='Alberto'?' active-alberto':'');
+  document.getElementById('btnUsuarioActual').textContent = '👷 ' + nombre;
   document.getElementById('userModal').style.display = 'none';
 }
 function cambiarUsuario(n) { setUsuario(n); toast('✓ Cambiado a '+n); }
 
 // INIT
 async function init() {
+  document.getElementById('userChoiceBtns').innerHTML = OPERARIOS.map(op =>
+    `<button class="btn-user-choice" onclick="setUsuario('${op}')">${esc(op)}</button>`
+  ).join('');
   const usr = localStorage.getItem('usuario');
   if (usr) setUsuario(usr);
   else document.getElementById('userModal').style.display = 'flex';
   await Promise.all([cargarNotas(), cargarCompras()]);
   suscribirRealtime();
+}
+
+// ── EN CURSO ──
+function abrirIniciar(id) {
+  iniciandoId = (iniciandoId === id) ? null : id;
+  iniciandoSeleccion = [];
+  renderizarNotas();
+}
+function toggleSeleccionInicio(nombre) {
+  iniciandoSeleccion = iniciandoSeleccion.includes(nombre)
+    ? iniciandoSeleccion.filter(n => n !== nombre)
+    : [...iniciandoSeleccion, nombre];
+  renderizarNotas();
+}
+async function confirmarIniciar(id) {
+  if (!iniciandoSeleccion.length) { toast('Elegí al menos un operario'); return; }
+  const { error } = await sb.from('notas').update({ estado: 'en_curso', responsables: iniciandoSeleccion }).eq('id', id);
+  if (error) { toast('❌ Error'); return; }
+  const nota = notas.find(n => n.id === id);
+  if (nota) { nota.estado = 'en_curso'; nota.responsables = iniciandoSeleccion; }
+  iniciandoId = null; iniciandoSeleccion = [];
+  renderizarNotas();
+  toast('▶️ Puesta en curso');
+}
+function renderIniciarPopover(nota) {
+  if (iniciandoId !== nota.id) return '';
+  return `<div class="resp-popover" onclick="event.stopPropagation()">
+    ${OPERARIOS.map(op => `
+      <label class="resp-option">
+        <input type="checkbox" ${iniciandoSeleccion.includes(op) ? 'checked' : ''} onclick="toggleSeleccionInicio('${op}')">
+        ${esc(op)}
+      </label>`).join('')}
+    <button class="resp-popover-close" style="background:var(--baja);color:#04202b;border:none;font-weight:700;" onclick="confirmarIniciar('${nota.id}')">▶️ Iniciar</button>
+  </div>`;
 }
 
 // ── IMÁGENES ──
@@ -477,13 +553,15 @@ function renderizarNotas() {
     if (!cols[p].length) { el.innerHTML='<div class="empty-state">Sin tareas pendientes</div>'; return; }
     el.innerHTML = cols[p].map(n=>renderCard(n,p)).join('');
   });
+  if (tabActual === 'operarios') renderizarOperarios();
 }
 
 function renderCard(nota, prioridad) {
   const f = new Date(nota.created_at);
   const fd = f.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'});
   const fh = f.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-  const ac = nota.autor==='Carlos'?'author-carlos':'author-alberto';
+  const ac = nota.autor==='Carlos'?'author-carlos':(nota.autor==='Alberto'?'author-alberto':'author-op');
+  const enCurso = nota.estado === 'en_curso';
   if (editandoId===nota.id) return `
     <div class="card" data-id="${nota.id}">
       <textarea class="edit-textarea" id="edit-${nota.id}">${esc(nota.texto)}</textarea>
@@ -496,14 +574,19 @@ function renderCard(nota, prioridad) {
   return `
     <div class="card" data-id="${nota.id}">
       <div class="card-top">
-        <div class="card-text">${esc(nota.texto)}</div>
+        <div class="card-text">${esc(nota.texto)}${enCurso ? '<span class="estado-badge en-curso">En curso</span>' : ''}</div>
         <div class="card-actions">
-          <button class="card-btn complete" onclick="completarNota('${nota.id}')" title="Completar">✅</button>
+          ${enCurso
+            ? `<button class="card-btn complete" onclick="completarNota('${nota.id}')" title="Terminado">✅</button>`
+            : `<button class="card-btn iniciar" onclick="event.stopPropagation();abrirIniciar('${nota.id}')" title="Poner en curso">▶️</button>`}
           <button class="card-btn" onclick="iniciarEdicion('${nota.id}')" title="Editar">✏️</button>
           <button class="card-btn delete" onclick="confirmarEliminar('${nota.id}')" title="Eliminar">🗑</button>
         </div>
       </div>
-      <div class="card-meta"><span class="card-author ${ac}">${esc(nota.autor)}</span><span class="card-date">${fd} ${fh}</span>${renderResponsables('notas', nota)}</div>
+      <div class="card-meta" style="position:relative">
+        <span class="card-author ${ac}">${esc(nota.autor)}</span><span class="card-date">${fd} ${fh}</span>${renderResponsables('notas', nota)}
+        ${renderIniciarPopover(nota)}
+      </div>
       ${renderImagenes(nota.imagenes)}
     </div>`;
 }
@@ -555,12 +638,13 @@ function renderizarCompras() {
   const pendientes = compras.filter(c=>!c.comprado);
   const comprados = compras.filter(c=>c.comprado);
   const renderItem = c => {
-    const ac = c.autor==='Carlos'?'author-carlos':'author-alberto';
+    const ac = c.autor==='Carlos'?'author-carlos':(c.autor==='Alberto'?'author-alberto':'author-op');
     return `<div class="compra-card">
       <div class="compra-check ${c.comprado?'checked':''}" onclick="toggleCompra('${c.id}')">${c.comprado?'✓':''}</div>
       <div class="compra-texto ${c.comprado?'tachado':''}">${esc(c.texto)}</div>
       <div class="card-author ${ac}" style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;padding:1px 6px;border-radius:3px;">${esc(c.autor)}</div>
       ${renderResponsables('compras', c)}
+      ${renderImagenes(c.imagenes)}
       <div class="compra-actions">
         <button class="card-btn delete" onclick="eliminarCompra('${c.id}')" title="Eliminar">🗑</button>
       </div>
@@ -588,8 +672,8 @@ function renderizarHistorial() {
     const fc = new Date(h.closed_at||h.created_at).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'});
     const fch = new Date(h.closed_at||h.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
     const pill = `<span class="pill pill-${h.prioridad}">${h.prioridad}</span>`;
-    const ac = h.autor==='Carlos'?'author-carlos':'author-alberto';
-    const cc = (h.cerrado_por||'—')==='Carlos'?'author-carlos':'author-alberto';
+    const ac = h.autor==='Carlos'?'author-carlos':(h.autor==='Alberto'?'author-alberto':'author-op');
+    const cc = (h.cerrado_por||'—')==='Carlos'?'author-carlos':((h.cerrado_por||'—')==='Alberto'?'author-alberto':'author-op');
     return `<tr>
       <td>${esc(h.texto)}</td>
       <td>${pill}</td>
