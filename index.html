@@ -176,6 +176,8 @@
     .card.en-curso { border-left:3px solid var(--baja) !important; background:linear-gradient(90deg, rgba(74,158,204,0.10), var(--bg-card) 55%); }
     .estado-badge.en-curso { background:var(--baja); color:#04202b; font-weight:700; }
     .hist-card { border-left:3px solid var(--verde-border); }
+    .card.pausada { border-left:3px solid var(--media) !important; background:linear-gradient(90deg, rgba(245,158,11,0.10), var(--bg-card) 55%); }
+    .estado-badge.pausada { background:var(--media); color:#2b1a02; font-weight:700; }
 
     /* IMÁGENES */
     .img-gallery { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
@@ -408,6 +410,16 @@ async function init() {
   suscribirRealtime();
 }
 
+// ── PAUSAR ──
+async function pausarTarea(id) {
+  const { error } = await sb.from('notas').update({ estado: 'pausada' }).eq('id', id);
+  if (error) { toast('❌ Error'); return; }
+  const nota = notas.find(n => n.id === id);
+  if (nota) nota.estado = 'pausada';
+  renderizarNotas();
+  toast('⏸ Pausada');
+}
+
 // ── IMÁGENES ──
 function renderImagenes(imagenes) {
   if (!imagenes || !imagenes.length) return '';
@@ -578,6 +590,7 @@ function renderCard(nota, prioridad) {
   const fh = f.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
   const ac = nota.autor==='Carlos'?'author-carlos':(nota.autor==='Alberto'?'author-alberto':'author-op');
   const enCurso = nota.estado === 'en_curso';
+  const pausada = nota.estado === 'pausada';
   if (editandoId===nota.id) return `
     <div class="card" data-id="${nota.id}">
       <textarea class="edit-textarea" id="edit-${nota.id}">${esc(nota.texto)}</textarea>
@@ -587,14 +600,26 @@ function renderCard(nota, prioridad) {
       </div>
       <div class="card-meta"><span class="card-author ${ac}">${esc(nota.autor)}</span><span class="card-date">${fd} ${fh}</span></div>
     </div>`;
+  const badge = enCurso ? '<span class="estado-badge en-curso">🔵 En curso</span>'
+    : pausada ? '<span class="estado-badge pausada">⏸ Pausada</span>' : '';
+
+  let botonEstado;
+  if (enCurso) {
+    botonEstado = `<button class="card-btn" onclick="pausarTarea('${nota.id}')" title="Pausar">⏸</button>
+      <button class="card-btn complete" onclick="completarNota('${nota.id}')" title="Terminado">✅</button>`;
+  } else if (pausada) {
+    botonEstado = `<button class="card-btn iniciar" onclick="event.stopPropagation();abrirEquipoModal('notas','${nota.id}','iniciar')" title="Reanudar">▶️</button>
+      <button class="card-btn complete" onclick="completarNota('${nota.id}')" title="Terminado">✅</button>`;
+  } else {
+    botonEstado = `<button class="card-btn iniciar" onclick="event.stopPropagation();abrirEquipoModal('notas','${nota.id}','iniciar')" title="Poner en curso">▶️</button>`;
+  }
+
   return `
-    <div class="card ${enCurso ? 'en-curso' : ''}" data-id="${nota.id}">
+    <div class="card ${enCurso ? 'en-curso' : ''} ${pausada ? 'pausada' : ''}" data-id="${nota.id}">
       <div class="card-top">
-        <div class="card-text">${esc(nota.texto)}${enCurso ? '<span class="estado-badge en-curso">🔵 En curso</span>' : ''}</div>
+        <div class="card-text">${esc(nota.texto)}${badge}</div>
         <div class="card-actions">
-          ${enCurso
-            ? `<button class="card-btn complete" onclick="completarNota('${nota.id}')" title="Terminado">✅</button>`
-            : `<button class="card-btn iniciar" onclick="event.stopPropagation();abrirEquipoModal('notas','${nota.id}','iniciar')" title="Poner en curso">▶️</button>`}
+          ${botonEstado}
           <button class="card-btn" onclick="iniciarEdicion('${nota.id}')" title="Editar">✏️</button>
           <button class="card-btn delete" onclick="confirmarEliminar('${nota.id}')" title="Eliminar">🗑</button>
         </div>
