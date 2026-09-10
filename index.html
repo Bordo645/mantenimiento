@@ -170,6 +170,13 @@
     .operario-nombre { font-size:13px; font-weight:600; color:var(--text); }
     .operario-tarea { font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+    .equipo-modal-list { max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; margin-top:12px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); padding:8px 0; }
+
+    /* MÁS VISIBILIDAD PARA EN CURSO / TERMINADO */
+    .card.en-curso { border-left:3px solid var(--baja) !important; background:linear-gradient(90deg, rgba(74,158,204,0.10), var(--bg-card) 55%); }
+    .estado-badge.en-curso { background:var(--baja); color:#04202b; font-weight:700; }
+    .hist-card { border-left:3px solid var(--verde-border); }
+
     /* IMÁGENES */
     .img-gallery { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
     .img-thumb { width:56px; height:56px; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer; transition:opacity 0.15s; }
@@ -207,6 +214,8 @@
 <body>
 
 <!-- MODAL USUARIO -->
+<div id="equipoModalRoot"></div>
+
 <div class="modal-overlay" id="userModal">
   <div class="modal">
     <h2>👷 ¿Quién sos?</h2>
@@ -336,9 +345,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let usuario = null;
 let notas = [], compras = [], historial = [];
-let asignandoId = null; // id del ítem con el popover de responsables abierto
-let iniciandoId = null; // id de la tarea con el popover de "poner en curso" abierto
-let iniciandoSeleccion = []; // operarios elegidos mientras el popover de inicio está abierto
+
 
 const OPERARIOS = ["Agustín","Fernando","Marcos","Juan","Ariel","Héctor","Rogelio","Leonel","Germán","Javier","Brian","Tomi","Carlos","Alberto"];
 let editandoId = null, editandoCompraId = null;
@@ -401,40 +408,6 @@ async function init() {
   suscribirRealtime();
 }
 
-// ── EN CURSO ──
-function abrirIniciar(id) {
-  iniciandoId = (iniciandoId === id) ? null : id;
-  iniciandoSeleccion = [];
-  renderizarNotas();
-}
-function toggleSeleccionInicio(nombre) {
-  iniciandoSeleccion = iniciandoSeleccion.includes(nombre)
-    ? iniciandoSeleccion.filter(n => n !== nombre)
-    : [...iniciandoSeleccion, nombre];
-  renderizarNotas();
-}
-async function confirmarIniciar(id) {
-  if (!iniciandoSeleccion.length) { toast('Elegí al menos un operario'); return; }
-  const { error } = await sb.from('notas').update({ estado: 'en_curso', responsables: iniciandoSeleccion }).eq('id', id);
-  if (error) { toast('❌ Error'); return; }
-  const nota = notas.find(n => n.id === id);
-  if (nota) { nota.estado = 'en_curso'; nota.responsables = iniciandoSeleccion; }
-  iniciandoId = null; iniciandoSeleccion = [];
-  renderizarNotas();
-  toast('▶️ Puesta en curso');
-}
-function renderIniciarPopover(nota) {
-  if (iniciandoId !== nota.id) return '';
-  return `<div class="resp-popover" onclick="event.stopPropagation()">
-    ${OPERARIOS.map(op => `
-      <label class="resp-option">
-        <input type="checkbox" ${iniciandoSeleccion.includes(op) ? 'checked' : ''} onclick="toggleSeleccionInicio('${op}')">
-        ${esc(op)}
-      </label>`).join('')}
-    <button class="resp-popover-close" style="background:var(--baja);color:#04202b;border:none;font-weight:700;" onclick="confirmarIniciar('${nota.id}')">▶️ Iniciar</button>
-  </div>`;
-}
-
 // ── IMÁGENES ──
 function renderImagenes(imagenes) {
   if (!imagenes || !imagenes.length) return '';
@@ -450,44 +423,89 @@ function abrirLightbox(url) {
   document.body.appendChild(box);
 }
 
-// ── RESPONSABLES (tareas y compras) ──
-function abrirAsignar(id) {
-  asignandoId = (asignandoId === id) ? null : id;
-  renderizarNotas(); renderizarCompras();
-}
-function cerrarAsignar() {
-  asignandoId = null;
-  renderizarNotas(); renderizarCompras();
-}
-async function toggleResponsable(tabla, id, nombre) {
+// ── EQUIPO (responsables / poner en curso, tareas y compras) ──
+let equipoModal = null; // { tabla, id, modo: 'asignar'|'iniciar', seleccion }
+
+function abrirEquipoModal(tabla, id, modo) {
   const lista = tabla === 'notas' ? notas : compras;
   const item = lista.find(x => x.id === id);
   if (!item) return;
-  const actuales = item.responsables || [];
-  const nuevos = actuales.includes(nombre) ? actuales.filter(n => n !== nombre) : [...actuales, nombre];
-  const { error } = await sb.from(tabla).update({ responsables: nuevos }).eq('id', id);
-  if (error) { toast('❌ Error asignando'); return; }
-  item.responsables = nuevos;
-  renderizarNotas(); renderizarCompras();
+  equipoModal = { tabla, id, modo, seleccion: [...(item.responsables || [])] };
+  renderEquipoModal();
+}
+function cerrarEquipoModal() {
+  equipoModal = null;
+  renderEquipoModal();
+}
+function toggleEquipoSeleccion(nombre) {
+  if (!equipoModal) return;
+  const s = equipoModal.seleccion;
+  equipoModal.seleccion = s.includes(nombre) ? s.filter(n => n !== nombre) : [...s, nombre];
+  renderEquipoModal();
+}
+async function guardarEquipoModal() {
+  if (!equipoModal) return;
+  const { tabla, id, modo, seleccion } = equipoModal;
+
+  if (modo === 'iniciar' && !seleccion.length) {
+    toast('Elegí al menos un operario para poner en curso');
+    return;
+  }
+  if (modo === 'asignar' && tabla === 'notas') {
+    const item = notas.find(n => n.id === id);
+    if (item?.estado === 'en_curso' && !seleccion.length) {
+      toast('No podés dejar una tarea en curso sin operarios — marcala como Terminada en su lugar');
+      return;
+    }
+  }
+
+  const payload = { responsables: seleccion };
+  if (modo === 'iniciar') payload.estado = 'en_curso';
+
+  const { error } = await sb.from(tabla).update(payload).eq('id', id);
+  if (error) { toast('❌ Error guardando'); return; }
+
+  const lista = tabla === 'notas' ? notas : compras;
+  const item = lista.find(x => x.id === id);
+  if (item) {
+    item.responsables = seleccion;
+    if (modo === 'iniciar') item.estado = 'en_curso';
+  }
+  equipoModal = null;
+  renderizarNotas(); renderizarCompras(); renderEquipoModal();
+  toast(modo === 'iniciar' ? '▶️ Puesta en curso' : '✓ Equipo actualizado');
+}
+function renderEquipoModal() {
+  const root = document.getElementById('equipoModalRoot');
+  if (!equipoModal) { root.innerHTML = ''; return; }
+  const { seleccion, modo } = equipoModal;
+  root.innerHTML = `
+    <div class="modal-overlay" style="display:flex" onclick="if(event.target===this) cerrarEquipoModal()">
+      <div class="modal">
+        <h2>👷 ${modo === 'iniciar' ? '¿Quién va a trabajar en esto?' : 'Asignar responsables'}</h2>
+        <p>${modo === 'iniciar' ? 'Elegí al menos un operario para poner la tarea en curso.' : 'Marcá o desmarcá quién está a cargo.'}</p>
+        <div class="equipo-modal-list">
+          ${OPERARIOS.map(op => `
+            <label class="resp-option">
+              <input type="checkbox" ${seleccion.includes(op) ? 'checked' : ''} onclick="toggleEquipoSeleccion('${op}')">
+              ${esc(op)}
+            </label>`).join('')}
+        </div>
+        <div class="edit-actions" style="margin-top:12px;">
+          <button class="btn-save" onclick="guardarEquipoModal()">${modo === 'iniciar' ? '▶️ Iniciar' : 'Guardar'}</button>
+          <button class="btn-cancel" onclick="cerrarEquipoModal()">Cancelar</button>
+        </div>
+      </div>
+    </div>`;
 }
 function renderResponsables(tabla, item) {
   const resp = item.responsables || [];
   const chips = resp.length
     ? resp.map(n => `<span class="resp-chip">${esc(n)}</span>`).join('')
     : `<span class="resp-chip sin">Sin asignar</span>`;
-  const popover = asignandoId === item.id ? `
-    <div class="resp-popover" onclick="event.stopPropagation()">
-      ${OPERARIOS.map(op => `
-        <label class="resp-option">
-          <input type="checkbox" ${resp.includes(op) ? 'checked' : ''} onclick="toggleResponsable('${tabla}','${item.id}','${op}')">
-          ${esc(op)}
-        </label>`).join('')}
-      <button class="resp-popover-close" onclick="cerrarAsignar()">Listo</button>
-    </div>` : '';
   return `<div class="resp-wrap">
     ${chips}
-    <button class="btn-asignar" title="Asignar responsable" onclick="event.stopPropagation();abrirAsignar('${item.id}')">👷</button>
-    ${popover}
+    <button class="btn-asignar" title="Asignar responsable" onclick="event.stopPropagation();abrirEquipoModal('${tabla}','${item.id}','asignar')">👷</button>
   </div>`;
 }
 
@@ -570,20 +588,19 @@ function renderCard(nota, prioridad) {
       <div class="card-meta"><span class="card-author ${ac}">${esc(nota.autor)}</span><span class="card-date">${fd} ${fh}</span></div>
     </div>`;
   return `
-    <div class="card" data-id="${nota.id}">
+    <div class="card ${enCurso ? 'en-curso' : ''}" data-id="${nota.id}">
       <div class="card-top">
-        <div class="card-text">${esc(nota.texto)}${enCurso ? '<span class="estado-badge en-curso">En curso</span>' : ''}</div>
+        <div class="card-text">${esc(nota.texto)}${enCurso ? '<span class="estado-badge en-curso">🔵 En curso</span>' : ''}</div>
         <div class="card-actions">
           ${enCurso
             ? `<button class="card-btn complete" onclick="completarNota('${nota.id}')" title="Terminado">✅</button>`
-            : `<button class="card-btn iniciar" onclick="event.stopPropagation();abrirIniciar('${nota.id}')" title="Poner en curso">▶️</button>`}
+            : `<button class="card-btn iniciar" onclick="event.stopPropagation();abrirEquipoModal('notas','${nota.id}','iniciar')" title="Poner en curso">▶️</button>`}
           <button class="card-btn" onclick="iniciarEdicion('${nota.id}')" title="Editar">✏️</button>
           <button class="card-btn delete" onclick="confirmarEliminar('${nota.id}')" title="Eliminar">🗑</button>
         </div>
       </div>
-      <div class="card-meta" style="position:relative">
+      <div class="card-meta">
         <span class="card-author ${ac}">${esc(nota.autor)}</span><span class="card-date">${fd} ${fh}</span>${renderResponsables('notas', nota)}
-        ${renderIniciarPopover(nota)}
       </div>
       ${renderImagenes(nota.imagenes)}
     </div>`;
@@ -672,8 +689,8 @@ function renderizarHistorial() {
     const pill = `<span class="pill pill-${h.prioridad}">${h.prioridad}</span>`;
     const ac = h.autor==='Carlos'?'author-carlos':(h.autor==='Alberto'?'author-alberto':'author-op');
     const cc = (h.cerrado_por||'—')==='Carlos'?'author-carlos':((h.cerrado_por||'—')==='Alberto'?'author-alberto':'author-op');
-    return `<tr>
-      <td>${esc(h.texto)}</td>
+    return `<tr class="hist-row">
+      <td style="border-left:3px solid var(--verde-border);">${esc(h.texto)}</td>
       <td>${pill}</td>
       <td><span class="card-author ${ac}" style="font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace;padding:1px 6px;border-radius:3px;">${esc(h.autor)}</span></td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted);">${fc} ${fch}</td>
