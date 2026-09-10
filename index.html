@@ -87,7 +87,7 @@
     .card-text { font-size:13.5px; color:var(--text); line-height:1.45; flex:1; }
     .card-actions { display:flex; gap:4px; flex-shrink:0; opacity:0; transition:opacity 0.15s; }
     .card:hover .card-actions { opacity:1; }
-    .card-btn { width:26px; height:26px; border-radius:4px; border:1px solid var(--border); background:var(--bg-panel); color:var(--text-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:13px; transition:all 0.15s; }
+    .card-btn { width:36px; height:36px; border-radius:6px; border:1px solid var(--border); background:var(--bg-panel); color:var(--text-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:19px; transition:all 0.15s; }
     .card-btn:hover { border-color:var(--border-light); color:var(--text); }
     .card-btn.delete:hover { border-color:var(--alta); color:var(--alta); }
     .card-btn.complete:hover { border-color:var(--verde); color:var(--verde); }
@@ -152,12 +152,19 @@
     #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(60px); background:var(--bg-card); border:1px solid var(--border-light); border-radius:var(--radius); padding:10px 18px; font-size:13px; color:var(--text); z-index:300; transition:transform 0.25s ease; white-space:nowrap; }
     #toast.show { transform:translateX(-50%) translateY(0); }
 
+    /* LISTA ÚNICA DE TAREAS */
+    .lista-tareas { display:flex; flex-direction:column; gap:10px; max-width:820px; margin:0 auto; }
+    .urgente-check { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-muted); white-space:nowrap; cursor:pointer; user-select:none; }
+    .urgente-check input { width:16px; height:16px; cursor:pointer; }
+    .card.urgente { border-left:4px solid var(--alta) !important; }
+
     /* AUTOR GENÉRICO (operarios) */
     .author-op { color:var(--text-muted); background:rgba(255,255,255,0.06); }
 
     /* ESTADO EN CURSO */
-    .estado-badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:3px; margin-left:8px; text-transform:uppercase; letter-spacing:.4px; vertical-align:middle; }
+    .estado-badge { font-size:13px; font-weight:800; padding:4px 10px; border-radius:5px; margin-left:8px; margin-right:8px; text-transform:uppercase; letter-spacing:.4px; vertical-align:middle; display:inline-block; }
     .estado-badge.en-curso { background:rgba(74,158,204,0.15); color:var(--baja); }
+    .estado-badge.urgente { background:var(--alta); color:#fff; }
     .card-btn.iniciar:hover { border-color:var(--baja); color:var(--baja); }
 
     /* DASHBOARD DE OPERARIOS */
@@ -251,37 +258,13 @@
       <div class="add-form-title">Nueva tarea — <select id="usuarioActual" class="usuario-select" onchange="setUsuario(this.value)"><option value="">Elegí quién sos...</option></select></div>
       <div class="form-row">
         <textarea id="nuevaNota" placeholder="Describí la tarea o pendiente..." rows="1"></textarea>
-        <select class="priority-select" id="prioridad">
-          <option value="alta">🔴 Alta prioridad</option>
-          <option value="media" selected>🟡 Media prioridad</option>
-          <option value="baja">🔵 Baja prioridad</option>
-        </select>
+        <label class="urgente-check">
+          <input type="checkbox" id="nuevaUrgente"> 🚨 ¿Es urgente?
+        </label>
         <button class="btn-add" onclick="agregarNota()" id="btnAgregar">+ Agregar</button>
       </div>
     </div>
-    <div class="board">
-      <div class="column column-alta">
-        <div class="column-header">
-          <div class="column-label"><span class="dot dot-alta"></span>Alta prioridad</div>
-          <span class="count-badge" id="count-alta">0</span>
-        </div>
-        <div class="cards-container" id="col-alta"></div>
-      </div>
-      <div class="column column-media">
-        <div class="column-header">
-          <div class="column-label"><span class="dot dot-media"></span>Media prioridad</div>
-          <span class="count-badge" id="count-media">0</span>
-        </div>
-        <div class="cards-container" id="col-media"></div>
-      </div>
-      <div class="column column-baja">
-        <div class="column-header">
-          <div class="column-label"><span class="dot dot-baja"></span>Baja prioridad</div>
-          <span class="count-badge" id="count-baja">0</span>
-        </div>
-        <div class="cards-container" id="col-baja"></div>
-      </div>
-    </div>
+    <div class="lista-tareas" id="listaTareas"></div>
     <div style="display:flex;align-items:center;justify-content:center;margin-top:16px;">
       <span class="live-label"><span class="live-dot"></span>Sincronización en tiempo real</span>
     </div>
@@ -313,7 +296,7 @@
         <thead>
           <tr>
             <th>Tarea</th>
-            <th>Prioridad</th>
+            <th>Urgente</th>
             <th>Creada por</th>
             <th>Completada</th>
             <th>Cerrada por</th>
@@ -523,13 +506,14 @@ async function agregarNota() {
   if (!usuario) { toast('Elegí quién sos antes de agregar'); document.getElementById('usuarioActual').focus(); return; }
   const texto = document.getElementById('nuevaNota').value.trim();
   if (!texto) { toast('⚠️ Escribí algo primero'); return; }
-  const prioridad = document.getElementById('prioridad').value;
+  const urgente = document.getElementById('nuevaUrgente').checked;
   document.getElementById('btnAgregar').disabled = true;
-  const { data, error } = await sb.from('notas').insert({texto,prioridad,autor:usuario}).select().single();
+  const { data, error } = await sb.from('notas').insert({texto,urgente,autor:usuario}).select().single();
   document.getElementById('btnAgregar').disabled = false;
   if (error) { toast('❌ Error guardando'); return; }
   notas.unshift(data); renderizarNotas();
   document.getElementById('nuevaNota').value = '';
+  document.getElementById('nuevaUrgente').checked = false;
   toast('✓ Tarea agregada');
 }
 
@@ -543,7 +527,7 @@ async function completarNota(id) {
   const nota = notas.find(n=>n.id===id);
   if (!nota) return;
   const { error } = await sb.from('historial').insert({
-    texto: nota.texto, prioridad: nota.prioridad,
+    texto: nota.texto, urgente: nota.urgente || false,
     autor: nota.autor, cerrado_por: usuario,
     created_at_original: nota.created_at
   });
@@ -565,18 +549,19 @@ async function guardarEdicionNota(id) {
 }
 
 function renderizarNotas() {
-  const cols = {alta:[],media:[],baja:[]};
-  notas.forEach(n=>{ if(cols[n.prioridad]) cols[n.prioridad].push(n); });
-  ['alta','media','baja'].forEach(p=>{
-    const el = document.getElementById('col-'+p);
-    document.getElementById('count-'+p).textContent = cols[p].length;
-    if (!cols[p].length) { el.innerHTML='<div class="empty-state">Sin tareas pendientes</div>'; return; }
-    el.innerHTML = cols[p].map(n=>renderCard(n,p)).join('');
-  });
+  const el = document.getElementById('listaTareas');
+  if (!notas.length) { el.innerHTML = '<div class="empty-state">Sin tareas pendientes</div>'; }
+  else {
+    const ordenadas = [...notas].sort((a,b) => {
+      if (a.urgente !== b.urgente) return a.urgente ? -1 : 1;
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+    el.innerHTML = ordenadas.map(n => renderCard(n)).join('');
+  }
   if (tabActual === 'operarios') renderizarOperarios();
 }
 
-function renderCard(nota, prioridad) {
+function renderCard(nota) {
   const f = new Date(nota.created_at);
   const fd = f.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'});
   const fh = f.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
@@ -592,8 +577,9 @@ function renderCard(nota, prioridad) {
       </div>
       <div class="card-meta"><span class="card-author ${ac}">${esc(nota.autor)}</span><span class="card-date">${fd} ${fh}</span></div>
     </div>`;
-  const badge = enCurso ? '<span class="estado-badge en-curso">🔵 En curso</span>'
-    : pausada ? '<span class="estado-badge pausada">⏸ Pausada</span>' : '';
+  const badge = enCurso ? '<span class="estado-badge en-curso">🔵 EN CURSO</span>'
+    : pausada ? '<span class="estado-badge pausada">⏸ PAUSADA</span>' : '';
+  const urgenteBadge = nota.urgente ? '<span class="estado-badge urgente">🚨 URGENTE</span>' : '';
 
   let botonEstado;
   if (enCurso) {
@@ -607,9 +593,9 @@ function renderCard(nota, prioridad) {
   }
 
   return `
-    <div class="card ${enCurso ? 'en-curso' : ''} ${pausada ? 'pausada' : ''}" data-id="${nota.id}">
+    <div class="card ${enCurso ? 'en-curso' : ''} ${pausada ? 'pausada' : ''} ${nota.urgente ? 'urgente' : ''}" data-id="${nota.id}">
       <div class="card-top">
-        <div class="card-text">${esc(nota.texto)}${badge}</div>
+        <div class="card-text">${urgenteBadge}${esc(nota.texto)}${badge}</div>
         <div class="card-actions">
           ${botonEstado}
           <button class="card-btn" onclick="iniciarEdicion('${nota.id}')" title="Editar">✏️</button>
@@ -703,7 +689,7 @@ function renderizarHistorial() {
   tbody.innerHTML = historial.map(h=>{
     const fc = new Date(h.closed_at||h.created_at).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'});
     const fch = new Date(h.closed_at||h.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-    const pill = `<span class="pill pill-${h.prioridad}">${h.prioridad}</span>`;
+    const pill = h.urgente ? `<span class="pill" style="background:var(--alta);color:#fff;">🚨 URGENTE</span>` : `<span class="pill" style="color:var(--text-dim);">—</span>`;
     const ac = h.autor==='Carlos'?'author-carlos':(h.autor==='Alberto'?'author-alberto':'author-op');
     const cc = (h.cerrado_por||'—')==='Carlos'?'author-carlos':((h.cerrado_por||'—')==='Alberto'?'author-alberto':'author-op');
     return `<tr class="hist-row">
@@ -719,12 +705,11 @@ function renderizarHistorial() {
 // ── EXPORT ──
 function exportarPendientes() {
   if (!notas.length) { toast('⚠️ No hay tareas pendientes'); return; }
-  const orden = {alta:0,media:1,baja:2};
-  const sorted = [...notas].sort((a,b)=>orden[a.prioridad]-orden[b.prioridad]);
-  const rows = [['Prioridad','Tarea','Autor','Fecha carga']];
+  const sorted = [...notas].sort((a,b)=>(a.urgente===b.urgente)?0:(a.urgente?-1:1));
+  const rows = [['Urgente','Tarea','Autor','Fecha carga']];
   sorted.forEach(n=>{
     const f = new Date(n.created_at).toLocaleDateString('es-AR');
-    rows.push([n.prioridad.toUpperCase(), n.texto, n.autor, f]);
+    rows.push([n.urgente ? 'SÍ' : 'No', n.texto, n.autor, f]);
   });
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -736,10 +721,10 @@ function exportarPendientes() {
 
 function exportarHistorial() {
   if (!historial.length) { toast('⚠️ Sin historial en los últimos 30 días'); return; }
-  const rows = [['Tarea','Prioridad','Creada por','Fecha completada','Cerrada por']];
+  const rows = [['Tarea','Urgente','Creada por','Fecha completada','Cerrada por']];
   historial.forEach(h=>{
     const fc = new Date(h.closed_at||h.created_at).toLocaleDateString('es-AR');
-    rows.push([h.texto, h.prioridad.toUpperCase(), h.autor, fc, h.cerrado_por||'—']);
+    rows.push([h.texto, h.urgente ? 'SÍ' : 'No', h.autor, fc, h.cerrado_por||'—']);
   });
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
