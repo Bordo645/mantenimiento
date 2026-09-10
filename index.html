@@ -170,6 +170,8 @@
     .operario-nombre { font-size:13px; font-weight:600; color:var(--text); }
     .operario-tarea { font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+    .usuario-select { background:var(--bg-panel); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:3px 8px; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; cursor:pointer; }
+    .usuario-select:focus { outline:none; border-color:var(--alta); }
     .equipo-modal-list { max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; margin-top:12px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); padding:8px 0; }
 
     /* MÁS VISIBILIDAD PARA EN CURSO / TERMINADO */
@@ -218,14 +220,6 @@
 <!-- MODAL USUARIO -->
 <div id="equipoModalRoot"></div>
 
-<div class="modal-overlay" id="userModal">
-  <div class="modal">
-    <h2>👷 ¿Quién sos?</h2>
-    <p>Elegí tu nombre para identificar las tareas que cargues.</p>
-    <div class="user-choice-btns" id="userChoiceBtns"></div>
-  </div>
-</div>
-
 <!-- HEADER -->
 <header>
   <div class="header-left">
@@ -237,9 +231,7 @@
   </div>
   <div class="header-right">
     <div id="clock"></div>
-    <div class="user-selector">
-      <button class="user-btn active-op" id="btnUsuarioActual" onclick="document.getElementById('userModal').style.display='flex'">👷 Cambiar usuario</button>
-    </div>
+
   </div>
 </header>
 
@@ -256,7 +248,7 @@
   <!-- ── TAB TAREAS ── -->
   <div class="tab-content active" id="tab-tareas">
     <div class="add-form">
-      <div class="add-form-title">Nueva tarea — <span id="usuarioActual" style="color:var(--text)">—</span></div>
+      <div class="add-form-title">Nueva tarea — <select id="usuarioActual" class="usuario-select" onchange="setUsuario(this.value)"><option value="">Elegí quién sos...</option></select></div>
       <div class="form-row">
         <textarea id="nuevaNota" placeholder="Describí la tarea o pendiente..." rows="1"></textarea>
         <select class="priority-select" id="prioridad">
@@ -298,7 +290,7 @@
   <!-- ── TAB COMPRAS ── -->
   <div class="tab-content" id="tab-compras">
     <div class="add-form">
-      <div class="add-form-title">Agregar ítem — <span id="usuarioActualCompras" style="color:var(--text)">—</span></div>
+      <div class="add-form-title">Agregar ítem — <select id="usuarioActualCompras" class="usuario-select" onchange="setUsuario(this.value)"><option value="">Elegí quién sos...</option></select></div>
       <div class="form-row">
         <textarea id="nuevaCompra" placeholder="Ej: Fusible 10A, aceite hidráulico 10L, cable 2.5mm²..." rows="1"></textarea>
         <button class="btn-add" onclick="agregarCompra()" id="btnCompra" style="background:var(--verde)">+ Agregar</button>
@@ -391,19 +383,19 @@ function renderizarOperarios() {
 
 // USUARIO
 function setUsuario(nombre) {
+  if (!nombre) return;
   usuario = nombre;
   localStorage.setItem('usuario', nombre);
-  ['usuarioActual','usuarioActualCompras'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=nombre; });
-  document.getElementById('btnUsuarioActual').textContent = '👷 ' + nombre;
-  document.getElementById('userModal').style.display = 'none';
+  ['usuarioActual','usuarioActualCompras'].forEach(id => { const el=document.getElementById(id); if (el) el.value = nombre; });
 }
 function cambiarUsuario(n) { setUsuario(n); toast('✓ Cambiado a '+n); }
 
 // INIT
 async function init() {
-  document.getElementById('userChoiceBtns').innerHTML = OPERARIOS.map(op =>
-    `<button class="btn-user-choice" onclick="setUsuario('${op}')">${esc(op)}</button>`
-  ).join('');
+  const opcionesHtml = OPERARIOS.map(op => `<option value="${esc(op)}">${esc(op)}</option>`).join('');
+  ['usuarioActual','usuarioActualCompras'].forEach(id => {
+    document.getElementById(id).insertAdjacentHTML('beforeend', opcionesHtml);
+  });
   const usr = localStorage.getItem('usuario');
   if (usr) setUsuario(usr);
   await Promise.all([cargarNotas(), cargarCompras()]);
@@ -528,7 +520,7 @@ async function cargarNotas() {
 }
 
 async function agregarNota() {
-  if (!usuario) { document.getElementById('userModal').style.display='flex'; return; }
+  if (!usuario) { toast('Elegí quién sos antes de agregar'); document.getElementById('usuarioActual').focus(); return; }
   const texto = document.getElementById('nuevaNota').value.trim();
   if (!texto) { toast('⚠️ Escribí algo primero'); return; }
   const prioridad = document.getElementById('prioridad').value;
@@ -645,7 +637,7 @@ async function cargarCompras() {
 }
 
 async function agregarCompra() {
-  if (!usuario) { document.getElementById('userModal').style.display='flex'; return; }
+  if (!usuario) { toast('Elegí quién sos antes de agregar'); document.getElementById('usuarioActualCompras').focus(); return; }
   const texto = document.getElementById('nuevaCompra').value.trim();
   if (!texto) { toast('⚠️ Escribí algo primero'); return; }
   document.getElementById('btnCompra').disabled=true;
