@@ -188,6 +188,18 @@
     .card.pausada { border-left:3px solid var(--media) !important; background:linear-gradient(90deg, rgba(245,158,11,0.10), var(--bg-card) 55%); }
     .estado-badge.pausada { background:var(--media); color:#2b1a02; font-weight:700; }
 
+    /* BANNER DE PREVENTIVO DEL DÍA */
+    .prev-banner { max-width:1500px; margin:0 auto 14px; background:rgba(74,158,204,0.10); border:1px solid var(--baja); border-radius:8px; padding:10px 16px; font-size:13.5px; font-weight:600; color:var(--baja); text-align:center; }
+
+    /* BUSCADOR / FILTROS */
+    .filtros-bar { max-width:1500px; margin:0 auto 14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .filtros-bar input { flex:1; min-width:200px; background:var(--bg-panel); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; }
+    .filtros-bar input:focus { outline:none; border-color:var(--baja); }
+    .filtros-modo { display:flex; gap:6px; }
+    .filtro-btn { background:var(--bg-panel); border:1px solid var(--border); color:var(--text-muted); padding:7px 12px; border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .filtro-btn.active { background:var(--baja); border-color:var(--baja); color:#04202b; }
+    .filtro-btn:hover:not(.active) { border-color:var(--border-light); }
+
     /* CELEBRACIÓN AL COMPLETAR */
     @keyframes confetti-fall {
       0% { transform: translateY(-20px) rotate(0deg); opacity:1; }
@@ -297,6 +309,15 @@
         <button class="btn-add" onclick="agregarNota()" id="btnAgregar">+ Agregar</button>
       </div>
     </div>
+    <div id="preventivoBanner" class="prev-banner" style="display:none"></div>
+    <div class="filtros-bar">
+      <input type="text" id="filtroTexto" placeholder="🔎 Buscar por texto o responsable..." oninput="aplicarFiltroNotas()">
+      <div class="filtros-modo">
+        <button class="filtro-btn active" data-modo="todas" onclick="setFiltroModo('todas')">Todas</button>
+        <button class="filtro-btn" data-modo="urgente" onclick="setFiltroModo('urgente')">🚨 Urgentes</button>
+        <button class="filtro-btn" data-modo="en_curso" onclick="setFiltroModo('en_curso')">🔵 En curso</button>
+      </div>
+    </div>
     <div class="lista-tareas" id="listaTareas"></div>
     <div style="display:flex;align-items:center;justify-content:center;margin-top:16px;">
       <span class="live-label"><span class="live-dot"></span>Sincronización en tiempo real</span>
@@ -311,6 +332,9 @@
         <textarea id="nuevaCompra" placeholder="Ej: Fusible 10A, aceite hidráulico 10L, cable 2.5mm²..." rows="1"></textarea>
         <button class="btn-add" onclick="agregarCompra()" id="btnCompra" style="background:var(--verde)">+ Agregar</button>
       </div>
+    </div>
+    <div class="filtros-bar">
+      <input type="text" id="filtroTextoCompras" placeholder="🔎 Buscar..." oninput="aplicarFiltroCompras()">
     </div>
     <div id="listaCompras" class="compras-list"></div>
   </div>
@@ -368,6 +392,9 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let usuario = null;
 let notas = [], compras = [], historial = [];
+let filtroTexto = '';
+let filtroModo = 'todas'; // 'todas' | 'urgente' | 'en_curso'
+let filtroTextoCompras = '';
 
 
 const OPERARIOS = ["Agustín","Fernando","Marcos","Juan","Ariel","Héctor","Rogelio","Leonel","Germán","Javier","Brian","Tomi","Carlos","Alberto"];
@@ -428,8 +455,18 @@ async function init() {
   });
   const usr = localStorage.getItem('usuario');
   if (usr) setUsuario(usr);
-  await Promise.all([cargarNotas(), cargarCompras()]);
+  await Promise.all([cargarNotas(), cargarCompras(), cargarBannerPreventivoHoy()]);
   suscribirRealtime();
+}
+
+async function cargarBannerPreventivoHoy() {
+  const hoy = new Date();
+  const { data, error } = await sb.from('preventivo').select('*')
+    .eq('anio', hoy.getFullYear()).eq('mes', hoy.getMonth() + 1).eq('dia', hoy.getDate());
+  const banner = document.getElementById('preventivoBanner');
+  if (error || !data || !data.length) { banner.style.display = 'none'; return; }
+  banner.textContent = `🗓 Hoy toca preventivo: ${data.map(p => p.maquina).join(', ')}`;
+  banner.style.display = 'block';
 }
 
 // ── CELEBRACIÓN AL COMPLETAR ──
@@ -465,8 +502,27 @@ function mostrarCelebracion(mensaje) {
   setTimeout(() => el.remove(), 3200);
 }
 
+function sonidoCompletar() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ahora = ctx.currentTime;
+    [880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.0001, ahora + i * 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.22, ahora + i * 0.09 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ahora + i * 0.09 + 0.35);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ahora + i * 0.09); osc.stop(ahora + i * 0.09 + 0.4);
+    });
+  } catch (e) { /* si el navegador bloquea audio sin interacción previa, no pasa nada */ }
+}
+
 async function celebrarCompletado(nombre) {
   lanzarConfetti();
+  sonidoCompletar();
   const inicioSemana = new Date();
   inicioSemana.setDate(inicioSemana.getDate() - inicioSemana.getDay());
   inicioSemana.setHours(0, 0, 0, 0);
@@ -714,15 +770,40 @@ async function guardarEdicionNota(id) {
 
 function renderizarNotas() {
   const el = document.getElementById('listaTareas');
-  if (!notas.length) { el.innerHTML = '<div class="empty-state">Sin tareas pendientes</div>'; }
+  let filtradas = notas.filter(n => {
+    if (filtroModo === 'urgente' && !n.urgente) return false;
+    if (filtroModo === 'en_curso' && n.estado !== 'en_curso') return false;
+    if (filtroTexto) {
+      const t = filtroTexto.toLowerCase();
+      const enTexto = n.texto.toLowerCase().includes(t);
+      const enResponsables = (n.responsables || []).some(r => r.toLowerCase().includes(t));
+      if (!enTexto && !enResponsables) return false;
+    }
+    return true;
+  });
+  if (!filtradas.length) { el.innerHTML = `<div class="empty-state">${notas.length ? 'Nada coincide con el filtro' : 'Sin tareas pendientes'}</div>`; }
   else {
-    const ordenadas = [...notas].sort((a,b) => {
+    const ordenadas = [...filtradas].sort((a,b) => {
       if (a.urgente !== b.urgente) return a.urgente ? -1 : 1;
       return new Date(b.created_at) - new Date(a.created_at);
     });
     el.innerHTML = ordenadas.map(n => renderCard(n)).join('');
   }
   if (tabActual === 'operarios') renderizarOperarios();
+}
+
+function aplicarFiltroNotas() {
+  filtroTexto = document.getElementById('filtroTexto').value.trim();
+  renderizarNotas();
+}
+function setFiltroModo(modo) {
+  filtroModo = modo;
+  document.querySelectorAll('.filtro-btn').forEach(b => b.classList.toggle('active', b.dataset.modo === modo));
+  renderizarNotas();
+}
+function aplicarFiltroCompras() {
+  filtroTextoCompras = document.getElementById('filtroTextoCompras').value.trim();
+  renderizarCompras();
 }
 
 function renderCard(nota) {
@@ -817,8 +898,12 @@ async function eliminarCompra(id) {
 function renderizarCompras() {
   const el = document.getElementById('listaCompras');
   if (!compras.length) { el.innerHTML='<div class="empty-state">Sin ítems en la lista de compras</div>'; return; }
-  const pendientes = compras.filter(c=>!c.comprado);
-  const comprados = compras.filter(c=>c.comprado);
+  const filtradas = filtroTextoCompras
+    ? compras.filter(c => c.texto.toLowerCase().includes(filtroTextoCompras.toLowerCase()))
+    : compras;
+  if (!filtradas.length) { el.innerHTML='<div class="empty-state">Nada coincide con el filtro</div>'; return; }
+  const pendientes = filtradas.filter(c=>!c.comprado);
+  const comprados = filtradas.filter(c=>c.comprado);
   const renderItem = c => {
     const ac = c.autor==='Carlos'?'author-carlos':(c.autor==='Alberto'?'author-alberto':'author-op');
     return `<div class="compra-card">
