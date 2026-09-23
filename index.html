@@ -543,8 +543,18 @@ async function init() {
 async function cargarBannerPreventivoHoy() {
   const banner = document.getElementById('preventivoBanner');
   try {
-    const { data: maq, error } = await sb.from('maquinas_programa').select('*').eq('activa', true);
+    const hoy = progHoyISO();
+    const [{ data: maq, error }, { data: hechasHoy }] = await Promise.all([
+      sb.from('maquinas_programa').select('*').eq('activa', true),
+      sb.from('paradas_realizadas').select('maquina_codigo').eq('fecha', hoy),
+    ]);
     if (error || !maq || !maq.length) { banner.style.display = 'none'; return; }
+    if (hechasHoy && hechasHoy.length) {
+      const codigos = hechasHoy.map(h => h.maquina_codigo).join(', ');
+      banner.textContent = `🗓 Preventivo de hoy: ya registrado (${codigos})`;
+      banner.style.display = 'block';
+      return;
+    }
     const debida = progOrdenarPorPrioridad(maq)[0];
     banner.textContent = `🗓 Hoy toca preventivo: ${debida.codigo} · ${debida.nombre} (${debida.sector})`;
     banner.style.display = 'block';
@@ -646,6 +656,8 @@ let progTareasPorMaquina = {};
 let progVisitCounts = {};
 let progVistaActual = 'agenda';
 let progSeleccionHoyCodigo = null; // si se eligió una máquina distinta a la que "tocaba" hoy
+let progVisitasHoy = []; // visitas ya registradas hoy (cualquier máquina)
+let progMostrarOtraHoy = false; // forzar a mostrar el formulario aunque ya haya una visita hoy
 
 function progHoyISO() {
   const d = new Date();
@@ -703,6 +715,9 @@ async function cargarPreventivo() {
   (paradas || []).forEach(p => { progVisitCounts[p.maquina_codigo] = (progVisitCounts[p.maquina_codigo] || 0) + 1; });
   if (cfg && cfg.fecha_inicio) document.getElementById('progFechaInicio').value = cfg.fecha_inicio;
 
+  const { data: visitasHoyData } = await sb.from('paradas_realizadas').select('*').eq('fecha', progHoyISO());
+  progVisitasHoy = visitasHoyData || [];
+
   progMostrarVista(progVistaActual);
 }
 
@@ -758,10 +773,12 @@ function pintarAgendaProg() {
   const cont = document.getElementById('progAgenda');
   if (!progMaquinas.length) { cont.innerHTML = '<div class="empty-state">Todavía no hay máquinas cargadas en el programa.</div>'; return; }
 
+  const mapaMaquinas = {};
+  progMaquinas.forEach(m => { mapaMaquinas[m.codigo] = m; });
+
   const debidaHoy = progOrdenarPorPrioridad(progMaquinas)[0];
   if (progSeleccionHoyCodigo && !progMaquinas.find(m => m.codigo === progSeleccionHoyCodigo && m.activa !== false)) progSeleccionHoyCodigo = null;
   const dias = progProyectarAgenda(PROG_DIAS_AGENDA, progSeleccionHoyCodigo);
-  const hoy = progHoyISO();
   const esSwap = !!(progSeleccionHoyCodigo && dias[0] && dias[0].maquina.codigo !== debidaHoy.codigo);
 
   // candidatas para "máquina contigua": mismo criterio que el resto del sistema, ordenadas por cercanía en el orden de ronda
@@ -770,55 +787,88 @@ function pintarAgendaProg() {
     .sort((a, b) => Math.abs((a.orden || 0) - debidaHoy.orden) - Math.abs((b.orden || 0) - debidaHoy.orden))
     .slice(0, 8);
 
-  cont.innerHTML = dias.map((d, idx) => {
-    const esHoy = d.fecha === hoy;
-    const tareasHtml = d.tareas.length ? d.tareas.map(t => `<label class="prog-task">
-        <input type="checkbox" data-tid="${t.id}" ${esHoy ? '' : 'disabled'} class="prog-chk-tarea" data-dayidx="${idx}" />
-        <div><div>${esc(t.parte)} — ${esc(t.actividad)}</div><div class="meta">${esc(t.frecuencia)}</div></div>
-      </label>`).join('') : '<div class="empty-state">Sin tareas cargadas para esta máquina.</div>';
-    const extra = [d.aplica.trimestral && 'trimestral', d.aplica.semestral && 'semestral', d.aplica.anual && 'anual'].filter(Boolean).join(' + ');
-    const marcarTodasHtml = (esHoy && d.tareas.length) ? `<label class="prog-task" style="border-bottom:none; padding-top:0;">
-        <input type="checkbox" onchange="progMarcarTodas(${idx}, this.checked)" />
-        <div><strong>Marcar todas hechas</strong></div>
-      </label>` : '';
+  let html = '';
 
-    let cambioHtml = '';
-    if (esHoy && !esSwap) {
-      cambioHtml = `<details class="no-print" style="margin:8px 0;">
-        <summary style="cursor:pointer;color:var(--baja);font-weight:700;font-size:12.5px;">No se puede parar hoy → elegir máquina contigua</summary>
-        <div class="prog-row" style="margin-top:8px;">
-          ${contiguas.map(m => `<button class="filtro-btn" onclick="progElegirMaquinaHoy('${esc(m.codigo)}')">${esc(m.codigo)} · ${esc(m.nombre)}</button>`).join('')}
-        </div>
-      </details>`;
-    } else if (esHoy && esSwap) {
-      cambioHtml = `<div class="no-print" style="background:rgba(245,158,11,0.10);border:1px solid var(--media);border-radius:8px;padding:10px 12px;margin:8px 0;">
-        <div style="font-size:12.5px;margin-bottom:6px;">
-          Vas a registrar el mantenimiento de <strong>${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</strong> en reemplazo de
-          <strong>${esc(debidaHoy.codigo)} · ${esc(debidaHoy.nombre)}</strong>, que queda pendiente para la próxima oportunidad.
-        </div>
-        <div class="prog-field" style="margin-bottom:6px;">
-          <label>Motivo del cambio</label>
-          <input id="progMotivoCambio" placeholder="Ej: pedido grande del cliente X en curso en la ${esc(debidaHoy.codigo)}">
-        </div>
-        <button class="filtro-btn" onclick="progVolverOriginalHoy()">Volver a la máquina original</button>
-      </div>`;
-    }
+  if (progVisitasHoy.length) {
+    html += progVisitasHoy.map(p => progRenderResumenHoy(p, mapaMaquinas)).join('');
+  }
 
-    return `<div class="prog-day ${esHoy ? 'hoy' : ''}" data-dayidx="${idx}">
-      <div class="prog-day-head">
-        <span class="prog-day-fecha">${progFormatoFecha(d.fecha)} ${esHoy ? '<span class="prog-tag-hoy">HOY</span>' : ''}</span>
-        <span><span class="prog-badge">${esc(d.maquina.sector)}</span> ${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</span>
-      </div>
-      <div class="prog-sub">Visita N° ${d.visitaNum}${extra ? ' · corresponde ' + extra : ' · solo tareas de todas las visitas'}</div>
-      ${cambioHtml}
-      ${marcarTodasHtml}
-      ${tareasHtml}
-      ${esHoy ? `<div class="no-print" style="margin-top:10px;">
-        <button class="btn-add" style="background:var(--verde)" onclick="progGuardarHoy(${idx})">Guardar visita de hoy</button>
-        <span id="progMsgHoy" class="prog-msg"></span>
-      </div>` : ''}
+  if (progVisitasHoy.length && !progMostrarOtraHoy) {
+    html += `<div class="no-print" style="max-width:1100px;margin:0 auto 14px;">
+      <button class="filtro-btn" onclick="progMostrarOtraHoy=true;pintarAgendaProg();">+ Registrar otra visita hoy (excepcional)</button>
     </div>`;
-  }).join('');
+  } else {
+    html += progRenderDiaCard(dias[0], 0, true, debidaHoy, esSwap, contiguas);
+  }
+
+  html += dias.slice(1).map((d, i) => progRenderDiaCard(d, i + 1, false)).join('');
+
+  cont.innerHTML = html;
+}
+
+function progRenderResumenHoy(p, mapaMaquinas) {
+  const m = mapaMaquinas[p.maquina_codigo] || {};
+  const tareas = p.tareas_realizadas || [];
+  const hechas = tareas.filter(t => t.hecho).length;
+  const swap = p.maquina_reemplazada_codigo
+    ? `<div style="color:var(--media);font-size:12px;margin-top:2px;">reemplazó a ${esc(p.maquina_reemplazada_codigo)}${p.motivo_cambio ? ': ' + esc(p.motivo_cambio) : ''}</div>` : '';
+  return `<div class="prog-day hoy">
+    <div class="prog-day-head">
+      <span class="prog-day-fecha">${progFormatoFecha(p.fecha)} <span class="prog-tag-hoy">✓ YA REGISTRADO HOY</span></span>
+      <span><span class="prog-badge">${esc(m.sector || '')}</span> ${esc(p.maquina_codigo)} · ${esc(m.nombre || '')}</span>
+    </div>
+    <div class="prog-sub">Visita N° ${p.visita_num ?? '—'} · ${tareas.length ? hechas + '/' + tareas.length + ' tareas hechas' : 'sin detalle'}${p.creado_por ? ' · registrado por ' + esc(p.creado_por) : ''}</div>
+    ${swap}
+  </div>`;
+}
+
+function progRenderDiaCard(d, idx, esHoy, debidaHoy, esSwap, contiguas) {
+  const tareasHtml = d.tareas.length ? d.tareas.map(t => `<label class="prog-task">
+      <input type="checkbox" data-tid="${t.id}" ${esHoy ? '' : 'disabled'} class="prog-chk-tarea" data-dayidx="${idx}" />
+      <div><div>${esc(t.parte)} — ${esc(t.actividad)}</div><div class="meta">${esc(t.frecuencia)}</div></div>
+    </label>`).join('') : '<div class="empty-state">Sin tareas cargadas para esta máquina.</div>';
+  const extra = [d.aplica.trimestral && 'trimestral', d.aplica.semestral && 'semestral', d.aplica.anual && 'anual'].filter(Boolean).join(' + ');
+  const marcarTodasHtml = (esHoy && d.tareas.length) ? `<label class="prog-task" style="border-bottom:none; padding-top:0;">
+      <input type="checkbox" onchange="progMarcarTodas(${idx}, this.checked)" />
+      <div><strong>Marcar todas hechas</strong></div>
+    </label>` : '';
+
+  let cambioHtml = '';
+  if (esHoy && !esSwap) {
+    cambioHtml = `<details class="no-print" style="margin:8px 0;">
+      <summary style="cursor:pointer;color:var(--baja);font-weight:700;font-size:12.5px;">No se puede parar hoy → elegir máquina contigua</summary>
+      <div class="prog-row" style="margin-top:8px;">
+        ${contiguas.map(m => `<button class="filtro-btn" onclick="progElegirMaquinaHoy('${esc(m.codigo)}')">${esc(m.codigo)} · ${esc(m.nombre)}</button>`).join('')}
+      </div>
+    </details>`;
+  } else if (esHoy && esSwap) {
+    cambioHtml = `<div class="no-print" style="background:rgba(245,158,11,0.10);border:1px solid var(--media);border-radius:8px;padding:10px 12px;margin:8px 0;">
+      <div style="font-size:12.5px;margin-bottom:6px;">
+        Vas a registrar el mantenimiento de <strong>${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</strong> en reemplazo de
+        <strong>${esc(debidaHoy.codigo)} · ${esc(debidaHoy.nombre)}</strong>, que queda pendiente para la próxima oportunidad.
+      </div>
+      <div class="prog-field" style="margin-bottom:6px;">
+        <label>Motivo del cambio</label>
+        <input id="progMotivoCambio" placeholder="Ej: pedido grande del cliente X en curso en la ${esc(debidaHoy.codigo)}">
+      </div>
+      <button class="filtro-btn" onclick="progVolverOriginalHoy()">Volver a la máquina original</button>
+    </div>`;
+  }
+
+  return `<div class="prog-day ${esHoy ? 'hoy' : ''}" data-dayidx="${idx}">
+    <div class="prog-day-head">
+      <span class="prog-day-fecha">${progFormatoFecha(d.fecha)} ${esHoy ? '<span class="prog-tag-hoy">HOY</span>' : ''}</span>
+      <span><span class="prog-badge">${esc(d.maquina.sector)}</span> ${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</span>
+    </div>
+    <div class="prog-sub">Visita N° ${d.visitaNum}${extra ? ' · corresponde ' + extra : ' · solo tareas de todas las visitas'}</div>
+    ${cambioHtml}
+    ${marcarTodasHtml}
+    ${tareasHtml}
+    ${esHoy ? `<div class="no-print" style="margin-top:10px;">
+      <button class="btn-add" style="background:var(--verde)" onclick="progGuardarHoy(${idx})">Guardar visita de hoy</button>
+      <span id="progMsgHoy" class="prog-msg"></span>
+    </div>` : ''}
+  </div>`;
 }
 
 function progElegirMaquinaHoy(codigo) {
@@ -868,6 +918,7 @@ async function progGuardarHoy(idx) {
   await sb.from('maquinas_programa').update({ ultima_visita: d.fecha }).eq('codigo', d.maquina.codigo);
   toast('✓ Mantenimiento registrado');
   progSeleccionHoyCodigo = null;
+  progMostrarOtraHoy = false;
   await cargarPreventivo();
   await cargarBannerPreventivoHoy();
 }
