@@ -752,6 +752,10 @@ function pintarAgendaProg() {
         <div><div>${esc(t.parte)} — ${esc(t.actividad)}</div><div class="meta">${esc(t.frecuencia)}</div></div>
       </label>`).join('') : '<div class="empty-state">Sin tareas cargadas para esta máquina.</div>';
     const extra = [d.aplica.trimestral && 'trimestral', d.aplica.semestral && 'semestral', d.aplica.anual && 'anual'].filter(Boolean).join(' + ');
+    const marcarTodasHtml = (esHoy && d.tareas.length) ? `<label class="prog-task" style="border-bottom:none; padding-top:0;">
+        <input type="checkbox" onchange="progMarcarTodas(${idx}, this.checked)" />
+        <div><strong>Marcar todas hechas</strong></div>
+      </label>` : '';
 
     return `<div class="prog-day ${esHoy ? 'hoy' : ''}" data-dayidx="${idx}">
       <div class="prog-day-head">
@@ -759,6 +763,7 @@ function pintarAgendaProg() {
         <span><span class="prog-badge">${esc(d.maquina.sector)}</span> ${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</span>
       </div>
       <div class="prog-sub">Visita N° ${d.visitaNum}${extra ? ' · corresponde ' + extra : ' · solo tareas de todas las visitas'}</div>
+      ${marcarTodasHtml}
       ${tareasHtml}
       ${esHoy ? `<div class="no-print" style="margin-top:10px;">
         <button class="btn-add" style="background:var(--verde)" onclick="progGuardarHoy(${idx})">Guardar visita de hoy</button>
@@ -766,6 +771,10 @@ function pintarAgendaProg() {
       </div>` : ''}
     </div>`;
   }).join('');
+}
+
+function progMarcarTodas(idx, marcar) {
+  document.querySelectorAll(`.prog-chk-tarea[data-dayidx="${idx}"]`).forEach(el => { el.checked = marcar; });
 }
 
 async function progGuardarHoy(idx) {
@@ -802,10 +811,28 @@ function pintarListaProg() {
       return `<tr>
         <td>${m.orden}</td><td><span class="prog-badge">${esc(m.sector)}</span></td>
         <td>${esc(m.codigo)}</td><td>${esc(m.nombre)}</td>
-        <td>${m.ultima_visita ? progFormatoFecha(m.ultima_visita) + ' (' + dias + ')' : 'Sin visitas'}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span id="progUV_${esc(m.codigo)}">${m.ultima_visita ? progFormatoFecha(m.ultima_visita) + ' (' + dias + ')' : 'Sin visitas'}</span>
+            <button class="stock-btn no-print" title="Corregir fecha" onclick="progEditarUltimaVisita('${esc(m.codigo)}')">✎</button>
+          </div>
+        </td>
         <td style="color:var(--text-dim);">${esc(partes || '—')}</td>
       </tr>`;
     }).join('') + '</tbody></table></div>';
+}
+
+async function progEditarUltimaVisita(codigo) {
+  const m = progMaquinas.find(x => x.codigo === codigo);
+  const actual = m && m.ultima_visita ? m.ultima_visita : '';
+  const nueva = prompt(`Corregir última visita de ${codigo} (AAAA-MM-DD). Dejalo vacío para "Sin visitas".`, actual);
+  if (nueva === null) return;
+  const valor = nueva.trim() || null;
+  if (valor && !/^\d{4}-\d{2}-\d{2}$/.test(valor)) { toast('⚠️ Formato de fecha inválido, usá AAAA-MM-DD'); return; }
+  const { error } = await sb.from('maquinas_programa').update({ ultima_visita: valor }).eq('codigo', codigo);
+  if (error) { toast('❌ Error guardando'); return; }
+  toast('✓ Fecha corregida');
+  await cargarPreventivo();
 }
 
 async function guardarFechaInicioProg() {
