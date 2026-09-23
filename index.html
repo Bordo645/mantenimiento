@@ -482,13 +482,6 @@ const SUPABASE_URL = 'https://bxxiujscpaqliptywmao.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4eGl1anNjcGFxbGlwdHl3bWFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3NTUxMTYsImV4cCI6MjA5NzMzMTExNn0.F8kEz_0mnxwbtWk-yHBiL1BsQ6joNbASFLsSBFuor-U';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Proyecto de Supabase donde ya están cargadas las 33 máquinas y las
-// tareas del programa de mantenimiento preventivo (el mismo que usa
-// control-preventivo.html). Pegá acá la anon key de ESE proyecto:
-// Supabase → ese proyecto → Project Settings → API → anon public.
-const PROG_URL = 'https://yiloafddzwdcjarzvhfh.supabase.co';
-const PROG_KEY = 'PEGAR_ACA_LA_ANON_KEY_DE_yiloafddzwdcjarzvhfh';
-const sbProg = window.supabase.createClient(PROG_URL, PROG_KEY);
 
 let usuario = null;
 let notas = [], compras = [], historial = [];
@@ -548,7 +541,7 @@ async function init() {
 async function cargarBannerPreventivoHoy() {
   const banner = document.getElementById('preventivoBanner');
   try {
-    const { data: maq, error } = await sbProg.from('maquinas_programa').select('*').eq('activa', true);
+    const { data: maq, error } = await sb.from('maquinas_programa').select('*').eq('activa', true);
     if (error || !maq || !maq.length) { banner.style.display = 'none'; return; }
     const debida = progOrdenarPorPrioridad(maq)[0];
     banner.textContent = `🗓 Hoy toca preventivo: ${debida.codigo} · ${debida.nombre} (${debida.sector})`;
@@ -695,10 +688,10 @@ function progTareaAplicaHoy(freq, aplica) {
 
 async function cargarPreventivo() {
   const [{ data: maq }, { data: tareas }, { data: cfg }, { data: paradas }] = await Promise.all([
-    sbProg.from('maquinas_programa').select('*').order('orden', { ascending: true }),
-    sbProg.from('tareas_maquina').select('*'),
-    sbProg.from('ronda_config').select('*').eq('id', 1).single(),
-    sbProg.from('paradas_realizadas').select('maquina_codigo'),
+    sb.from('maquinas_programa').select('*').order('orden', { ascending: true }),
+    sb.from('tareas_maquina').select('*'),
+    sb.from('ronda_config').select('*').eq('id', 1).single(),
+    sb.from('paradas_realizadas').select('maquina_codigo'),
   ]);
   progMaquinas = maq || [];
   progTareasPorMaquina = {};
@@ -783,14 +776,14 @@ async function progGuardarHoy(idx) {
   document.querySelectorAll(`.prog-chk-tarea[data-dayidx="${idx}"]:checked`).forEach(el => marcadas.add(Number(el.dataset.tid)));
   const tareasRealizadas = d.tareas.map(t => ({ parte: t.parte, actividad: t.actividad, frecuencia: t.frecuencia, hecho: marcadas.has(t.id) }));
 
-  const { error } = await sbProg.from('paradas_realizadas').insert({
+  const { error } = await sb.from('paradas_realizadas').insert({
     fecha: d.fecha, fecha_programada: d.fecha, maquina_codigo: d.maquina.codigo, visita_num: d.visitaNum,
     aplico_trimestral: d.aplica.trimestral, aplico_semestral: d.aplica.semestral, aplico_anual: d.aplica.anual,
     tareas_realizadas: tareasRealizadas, creado_por: usuario,
   });
   const msg = document.getElementById('progMsgHoy');
   if (error) { if (msg) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; } return; }
-  await sbProg.from('maquinas_programa').update({ ultima_visita: d.fecha }).eq('codigo', d.maquina.codigo);
+  await sb.from('maquinas_programa').update({ ultima_visita: d.fecha }).eq('codigo', d.maquina.codigo);
   toast('✓ Mantenimiento registrado');
   await cargarPreventivo();
   await cargarBannerPreventivoHoy();
@@ -819,7 +812,7 @@ async function guardarFechaInicioProg() {
   const val = document.getElementById('progFechaInicio').value;
   const msg = document.getElementById('progMsgFecha');
   if (!val) { msg.textContent = 'Elegí una fecha.'; msg.className = 'prog-msg err'; return; }
-  const { error } = await sbProg.from('ronda_config').update({ fecha_inicio: val }).eq('id', 1);
+  const { error } = await sb.from('ronda_config').update({ fecha_inicio: val }).eq('id', 1);
   if (error) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; return; }
   msg.textContent = 'Guardado (fecha de referencia informativa).'; msg.className = 'prog-msg ok';
 }
@@ -835,7 +828,7 @@ async function agregarMaquinaProg() {
   if (!codigo || !nombre) { msg.textContent = 'Completá código y nombre.'; msg.className = 'prog-msg err'; return; }
 
   const orden = progMaquinas.length ? Math.max(...progMaquinas.map(m => m.orden)) + 1 : 1;
-  const { error } = await sbProg.from('maquinas_programa').insert({
+  const { error } = await sb.from('maquinas_programa').insert({
     codigo, nombre, sector, orden, grupo_origen: 'N/A (máquina nueva)', ultima_visita: fecha,
   });
   if (error) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; return; }
@@ -843,7 +836,7 @@ async function agregarMaquinaProg() {
   if (partesRaw) {
     const partes = partesRaw.split(',').map(p => p.trim()).filter(Boolean);
     const filas = partes.map(p => ({ maquina_codigo: codigo, parte: p, actividad: 'Inspección general y lubricación (ajustar según corresponda).', frecuencia: 'Mensual' }));
-    if (filas.length) await sbProg.from('tareas_maquina').insert(filas);
+    if (filas.length) await sb.from('tareas_maquina').insert(filas);
   }
 
   msg.textContent = 'Máquina agregada.'; msg.className = 'prog-msg ok';
