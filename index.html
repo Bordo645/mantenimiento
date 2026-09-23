@@ -266,6 +266,44 @@
     .resp-option:hover { background:var(--bg-card); }
     .resp-popover-close { display:block; width:100%; text-align:center; margin-top:6px; padding:5px; border-radius:4px; border:1px solid var(--border); background:transparent; color:var(--text-muted); font-size:12px; cursor:pointer; font-family:'Inter',sans-serif; }
 
+    /* PROGRAMA PREVENTIVO DETALLADO (máquinas / partes / ticks) */
+    .prog-toggle { display:flex; gap:8px; max-width:1100px; margin:0 auto 14px; }
+    .prog-toggle button { background:var(--bg-panel); border:1px solid var(--border); color:var(--text-muted); padding:8px 14px; border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Inter',sans-serif; }
+    .prog-toggle button.active { background:var(--baja); border-color:var(--baja); color:#04202b; }
+    .prog-config { max-width:1100px; margin:0 auto 16px; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+    .prog-config summary { cursor:pointer; color:var(--baja); font-weight:700; font-size:12.5px; }
+    .prog-row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:10px; }
+    .prog-field { display:flex; flex-direction:column; gap:4px; min-width:150px; }
+    .prog-field label { font-size:11px; font-weight:700; color:var(--text-muted); }
+    .prog-field input, .prog-field select { background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:7px 9px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; }
+    .prog-msg { font-size:12px; margin-top:6px; }
+    .prog-msg.ok { color:var(--verde); } .prog-msg.err { color:var(--alta); }
+    .prog-day { max-width:1100px; margin:0 auto 12px; background:var(--bg-panel); border:1px solid var(--border); border-radius:8px; padding:14px 16px; }
+    .prog-day.hoy { border-color:var(--baja); box-shadow:0 0 0 1px var(--baja); }
+    .prog-day-head { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:4px; }
+    .prog-day-fecha { font-weight:800; color:var(--text); font-size:13.5px; text-transform:capitalize; }
+    .prog-tag-hoy { background:var(--baja); color:#04202b; font-size:10.5px; padding:2px 8px; border-radius:20px; font-weight:700; }
+    .prog-sub { color:var(--text-dim); font-size:11.5px; margin:0 0 8px; }
+    .prog-task { display:flex; align-items:flex-start; gap:8px; padding:6px 2px; border-bottom:1px solid var(--border); font-size:13px; }
+    .prog-task input[type=checkbox] { margin-top:2px; width:15px; height:15px; }
+    .prog-task .meta { color:var(--text-dim); font-size:11px; }
+    .prog-badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10.5px; font-weight:700; background:rgba(74,158,204,0.15); color:var(--baja); }
+    .prog-tabla-wrap { max-width:1400px; margin:0 auto; overflow-x:auto; }
+    .prog-tabla { width:100%; border-collapse:collapse; font-size:12.5px; }
+    .prog-tabla th { text-align:left; padding:8px 10px; color:var(--text-dim); text-transform:uppercase; font-size:10.5px; letter-spacing:.4px; border-bottom:1px solid var(--border-light); }
+    .prog-tabla td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+
+    @media print {
+      header, .tabs, .add-form, .filtros-bar, .prog-toggle, .prog-config, .prev-nav, .live-label, #toast, .no-print { display:none !important; }
+      body { background:#fff; color:#000; }
+      main { max-width:100%; padding:0; }
+      .prog-day { border:1px solid #999; break-inside:avoid; background:#fff; color:#000; }
+      .prog-day-fecha, .prog-sub, .prog-task .meta { color:#000 !important; }
+      .prog-task input[type=checkbox] { appearance:none; -webkit-appearance:none; width:13px; height:13px; border:1.3px solid #333; border-radius:3px; }
+      .tab-content { display:none !important; }
+      .tab-content.active { display:block !important; }
+    }
+
     /* RESPONSIVE */
     @media (max-width:720px) {
       header { padding:0 10px; height:52px; }
@@ -382,15 +420,41 @@
 
   <!-- ── TAB PREVENTIVO ── -->
   <div class="tab-content" id="tab-preventivo">
-    <div class="prev-header">
-      <button class="prev-nav" onclick="cambiarMesPreventivo(-1)">←</button>
-      <div class="prev-mes-titulo" id="prevMesTitulo"></div>
-      <button class="prev-nav" onclick="cambiarMesPreventivo(1)">→</button>
+    <details class="prog-config no-print">
+      <summary>⚙️ Configuración del programa</summary>
+      <div class="prog-row">
+        <div class="prog-field">
+          <label>Fecha de inicio de referencia (opcional)</label>
+          <input type="date" id="progFechaInicio" />
+        </div>
+        <button class="btn-add" style="background:var(--baja)" onclick="guardarFechaInicioProg()">Guardar fecha</button>
+        <span id="progMsgFecha" class="prog-msg"></span>
+      </div>
+      <div class="prog-row" style="border-top:1px solid var(--border); padding-top:10px;">
+        <div class="prog-field"><label>Código</label><input id="progCodigo" /></div>
+        <div class="prog-field"><label>Nombre</label><input id="progNombre" /></div>
+        <div class="prog-field">
+          <label>Sector</label>
+          <select id="progSector">
+            <option>CONFECCION</option><option>EXTRUSION</option><option>IMPRESIÓN</option>
+            <option>REFILE</option><option>REVISADORA</option><option>LAMINACION</option>
+          </select>
+        </div>
+        <div class="prog-field" style="min-width:220px;"><label>Partes (separadas por coma)</label><input id="progPartes" placeholder="CABEZAL, TABLERO..." /></div>
+        <div class="prog-field"><label>Fecha de referencia (opcional)</label><input type="date" id="progFechaMaquina" /></div>
+        <button class="btn-add" onclick="agregarMaquinaProg()">+ Agregar máquina</button>
+      </div>
+      <span id="progMsgAlta" class="prog-msg"></span>
+    </details>
+
+    <div class="prog-toggle no-print">
+      <button id="progBtnAgenda" class="active" onclick="progMostrarVista('agenda')">📅 Agenda día a día</button>
+      <button id="progBtnLista" onclick="progMostrarVista('lista')">📋 Programa completo</button>
+      <button onclick="window.print()">🖨 Imprimir</button>
     </div>
-    <div class="prev-dias-semana">
-      <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
-    </div>
-    <div class="prev-grid" id="prevGrid"></div>
+
+    <div id="progAgenda"></div>
+    <div id="progLista" style="display:none"></div>
   </div>
   <!-- ── TAB STOCK ── -->
   <div class="tab-content" id="tab-stock">
@@ -417,6 +481,14 @@
 const SUPABASE_URL = 'https://bxxiujscpaqliptywmao.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4eGl1anNjcGFxbGlwdHl3bWFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3NTUxMTYsImV4cCI6MjA5NzMzMTExNn0.F8kEz_0mnxwbtWk-yHBiL1BsQ6joNbASFLsSBFuor-U';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// Proyecto de Supabase donde ya están cargadas las 33 máquinas y las
+// tareas del programa de mantenimiento preventivo (el mismo que usa
+// control-preventivo.html). Pegá acá la anon key de ESE proyecto:
+// Supabase → ese proyecto → Project Settings → API → anon public.
+const PROG_URL = 'https://yiloafddzwdcjarzvhfh.supabase.co';
+const PROG_KEY = 'PEGAR_ACA_LA_ANON_KEY_DE_yiloafddzwdcjarzvhfh';
+const sbProg = window.supabase.createClient(PROG_URL, PROG_KEY);
 
 let usuario = null;
 let notas = [], compras = [], historial = [];
@@ -474,13 +546,14 @@ async function init() {
 }
 
 async function cargarBannerPreventivoHoy() {
-  const hoy = new Date();
-  const { data, error } = await sb.from('preventivo').select('*')
-    .eq('anio', hoy.getFullYear()).eq('mes', hoy.getMonth() + 1).eq('dia', hoy.getDate());
   const banner = document.getElementById('preventivoBanner');
-  if (error || !data || !data.length) { banner.style.display = 'none'; return; }
-  banner.textContent = `🗓 Hoy toca preventivo: ${data.map(p => p.maquina).join(', ')}`;
-  banner.style.display = 'block';
+  try {
+    const { data: maq, error } = await sbProg.from('maquinas_programa').select('*').eq('activa', true);
+    if (error || !maq || !maq.length) { banner.style.display = 'none'; return; }
+    const debida = progOrdenarPorPrioridad(maq)[0];
+    banner.textContent = `🗓 Hoy toca preventivo: ${debida.codigo} · ${debida.nombre} (${debida.sector})`;
+    banner.style.display = 'block';
+  } catch (e) { banner.style.display = 'none'; }
 }
 
 // ── STOCK ──
@@ -570,71 +643,215 @@ async function moverStock(id, tipo) {
   toast(tipo === 'ingreso' ? `✓ +${cantidad} ingresado` : `✓ -${cantidad} consumido`);
 }
 
-// ── PREVENTIVO ──
-let prevFecha = new Date(); // mes que se está mostrando
-let preventivoData = []; // filas del mes actual
+// ── PREVENTIVO (programa detallado: máquinas / partes / ticks) ──
+const PROG_DIAS_AGENDA = 6; // hoy + próximos días hábiles
+
+let progMaquinas = [];
+let progTareasPorMaquina = {};
+let progVisitCounts = {};
+let progVistaActual = 'agenda';
+
+function progHoyISO() {
+  const d = new Date();
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
+}
+function progSumarDiasHabiles(fechaISO, n) {
+  let d = new Date(fechaISO + 'T00:00:00');
+  let restantes = n;
+  while (restantes > 0) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0) restantes--; }
+  return d;
+}
+function progFormatoFecha(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'short' });
+}
+function progDiasSinVisita(m, fechaISOStr) {
+  if (!m.ultima_visita) return Infinity;
+  const a = new Date(m.ultima_visita + 'T00:00:00');
+  const b = new Date(fechaISOStr + 'T00:00:00');
+  return Math.round((b - a) / 86400000);
+}
+function progOrdenarPorPrioridad(maquinas, fecha) {
+  fecha = fecha || progHoyISO();
+  return [...maquinas].filter(m => m.activa !== false).sort((a, b) => {
+    const da = progDiasSinVisita(a, fecha), db = progDiasSinVisita(b, fecha);
+    if (da !== db) return db - da;
+    return (a.orden || 0) - (b.orden || 0);
+  });
+}
+function progFrecuenciasQueAplican(visitaNum) {
+  if (!visitaNum || visitaNum < 1) return { trimestral: false, semestral: false, anual: false };
+  return { trimestral: (visitaNum - 1) % 3 === 0, semestral: (visitaNum - 1) % 5 === 0, anual: (visitaNum - 1) % 10 === 0 };
+}
+function progTareaAplicaHoy(freq, aplica) {
+  const siempre = ['Mensual', 'Quincenal', 'Semanal', 'Bimestral'];
+  if (siempre.includes(freq)) return true;
+  if (freq === 'Trimestral') return aplica.trimestral;
+  if (freq === 'Semestral') return aplica.semestral;
+  if (freq === 'Anual') return aplica.anual;
+  return false;
+}
 
 async function cargarPreventivo() {
-  const anio = prevFecha.getFullYear();
-  const mes = prevFecha.getMonth() + 1;
-  const { data, error } = await sb.from('preventivo').select('*').eq('anio', anio).eq('mes', mes);
-  if (error) { toast('❌ Error cargando preventivo'); return; }
-  preventivoData = data || [];
-  renderizarPreventivo();
+  const [{ data: maq }, { data: tareas }, { data: cfg }, { data: paradas }] = await Promise.all([
+    sbProg.from('maquinas_programa').select('*').order('orden', { ascending: true }),
+    sbProg.from('tareas_maquina').select('*'),
+    sbProg.from('ronda_config').select('*').eq('id', 1).single(),
+    sbProg.from('paradas_realizadas').select('maquina_codigo'),
+  ]);
+  progMaquinas = maq || [];
+  progTareasPorMaquina = {};
+  (tareas || []).forEach(t => { (progTareasPorMaquina[t.maquina_codigo] ||= []).push(t); });
+  progVisitCounts = {};
+  (paradas || []).forEach(p => { progVisitCounts[p.maquina_codigo] = (progVisitCounts[p.maquina_codigo] || 0) + 1; });
+  if (cfg && cfg.fecha_inicio) document.getElementById('progFechaInicio').value = cfg.fecha_inicio;
+
+  progMostrarVista(progVistaActual);
 }
 
-function cambiarMesPreventivo(delta) {
-  prevFecha = new Date(prevFecha.getFullYear(), prevFecha.getMonth() + delta, 1);
-  cargarPreventivo();
+function progMostrarVista(v) {
+  progVistaActual = v;
+  document.getElementById('progBtnAgenda').classList.toggle('active', v === 'agenda');
+  document.getElementById('progBtnLista').classList.toggle('active', v === 'lista');
+  document.getElementById('progAgenda').style.display = v === 'agenda' ? 'block' : 'none';
+  document.getElementById('progLista').style.display = v === 'lista' ? 'block' : 'none';
+  if (v === 'agenda') pintarAgendaProg(); else pintarListaProg();
 }
 
-async function agregarMaquinaPreventivo(dia) {
-  const maquina = prompt('¿Qué máquina va ese día?');
-  if (!maquina || !maquina.trim()) return;
-  if (!usuario) { toast('Elegí quién sos primero (arriba en Tareas o Compras)'); return; }
-  const anio = prevFecha.getFullYear();
-  const mes = prevFecha.getMonth() + 1;
-  const { data, error } = await sb.from('preventivo')
-    .insert({ anio, mes, dia, maquina: maquina.trim(), autor: usuario })
-    .select().single();
-  if (error) { toast('❌ Error guardando'); return; }
-  preventivoData.push(data);
-  renderizarPreventivo();
-  toast('✓ Agregada');
-}
+// Proyecta los próximos N días hábiles: cada día "toca" la máquina activa
+// que hace más tiempo no recibe visita (simula el avance sin escribir nada).
+function progProyectarAgenda(n) {
+  const activas = progMaquinas.filter(m => m.activa !== false).map(m => ({ ...m }));
+  const counts = { ...progVisitCounts };
+  let fecha = progHoyISO();
+  const dias = [];
+  for (let i = 0; i < n; i++) {
+    if (i > 0) fecha = progSumarDiasHabiles(fecha, 1).toISOString().slice(0, 10);
+    else if (new Date(fecha + 'T00:00:00').getDay() === 0) fecha = progSumarDiasHabiles(fecha, 1).toISOString().slice(0, 10);
 
-async function quitarMaquinaPreventivo(id) {
-  const { error } = await sb.from('preventivo').delete().eq('id', id);
-  if (error) { toast('❌ Error eliminando'); return; }
-  preventivoData = preventivoData.filter(p => p.id !== id);
-  renderizarPreventivo();
-}
-
-function renderizarPreventivo() {
-  const anio = prevFecha.getFullYear();
-  const mes = prevFecha.getMonth(); // 0-indexado
-  const nombreMes = prevFecha.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
-  document.getElementById('prevMesTitulo').textContent = nombreMes;
-
-  const primerDiaSemana = (new Date(anio, mes, 1).getDay() + 6) % 7; // 0=lunes
-  const diasEnMes = new Date(anio, mes + 1, 0).getDate();
-  const hoy = new Date();
-  const esMesActual = hoy.getFullYear() === anio && hoy.getMonth() === mes;
-
-  const porDia = {};
-  preventivoData.forEach(p => { (porDia[p.dia] ||= []).push(p); });
-
-  let celdas = '';
-  for (let i = 0; i < primerDiaSemana; i++) celdas += '<div class="prev-celda vacia"></div>';
-  for (let dia = 1; dia <= diasEnMes; dia++) {
-    const items = porDia[dia] || [];
-    const esHoy = esMesActual && hoy.getDate() === dia;
-    celdas += `<div class="prev-celda ${esHoy ? 'hoy' : ''}">
-      <div class="prev-dia-num">${dia}<button class="prev-add-btn" onclick="agregarMaquinaPreventivo(${dia})" title="Agregar máquina">➕</button></div>
-      ${items.map(p => `<div class="prev-maquina-chip"><span>${esc(p.maquina)}</span><span class="quitar" onclick="quitarMaquinaPreventivo('${p.id}')">✕</span></div>`).join('')}
-    </div>`;
+    activas.sort((a, b) => {
+      const da = progDiasSinVisita(a, fecha), db = progDiasSinVisita(b, fecha);
+      if (da !== db) return db - da;
+      return (a.orden || 0) - (b.orden || 0);
+    });
+    const m = activas[0];
+    if (!m) break;
+    const visitaNum = (counts[m.codigo] || 0) + 1;
+    const aplica = progFrecuenciasQueAplican(visitaNum);
+    const tareas = (progTareasPorMaquina[m.codigo] || []).filter(t => progTareaAplicaHoy(t.frecuencia, aplica));
+    dias.push({ fecha, maquina: m, visitaNum, aplica, tareas });
+    counts[m.codigo] = visitaNum;
+    m.ultima_visita = fecha;
   }
-  document.getElementById('prevGrid').innerHTML = celdas;
+  return dias;
+}
+
+function pintarAgendaProg() {
+  const cont = document.getElementById('progAgenda');
+  if (!progMaquinas.length) { cont.innerHTML = '<div class="empty-state">Todavía no hay máquinas cargadas en el programa.</div>'; return; }
+  const dias = progProyectarAgenda(PROG_DIAS_AGENDA);
+  const hoy = progHoyISO();
+  cont.innerHTML = dias.map((d, idx) => {
+    const esHoy = d.fecha === hoy;
+    const tareasHtml = d.tareas.length ? d.tareas.map(t => `<label class="prog-task">
+        <input type="checkbox" data-tid="${t.id}" ${esHoy ? '' : 'disabled'} class="prog-chk-tarea" data-dayidx="${idx}" />
+        <div><div>${esc(t.parte)} — ${esc(t.actividad)}</div><div class="meta">${esc(t.frecuencia)}</div></div>
+      </label>`).join('') : '<div class="empty-state">Sin tareas cargadas para esta máquina.</div>';
+    const extra = [d.aplica.trimestral && 'trimestral', d.aplica.semestral && 'semestral', d.aplica.anual && 'anual'].filter(Boolean).join(' + ');
+
+    return `<div class="prog-day ${esHoy ? 'hoy' : ''}" data-dayidx="${idx}">
+      <div class="prog-day-head">
+        <span class="prog-day-fecha">${progFormatoFecha(d.fecha)} ${esHoy ? '<span class="prog-tag-hoy">HOY</span>' : ''}</span>
+        <span><span class="prog-badge">${esc(d.maquina.sector)}</span> ${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</span>
+      </div>
+      <div class="prog-sub">Visita N° ${d.visitaNum}${extra ? ' · corresponde ' + extra : ' · solo tareas de todas las visitas'}</div>
+      ${tareasHtml}
+      ${esHoy ? `<div class="no-print" style="margin-top:10px;">
+        <button class="btn-add" style="background:var(--verde)" onclick="progGuardarHoy(${idx})">Guardar visita de hoy</button>
+        <span id="progMsgHoy" class="prog-msg"></span>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function progGuardarHoy(idx) {
+  if (!usuario) { toast('Elegí primero quién sos (arriba en Tareas o Compras)'); return; }
+  const dias = progProyectarAgenda(PROG_DIAS_AGENDA);
+  const d = dias[idx];
+  const marcadas = new Set();
+  document.querySelectorAll(`.prog-chk-tarea[data-dayidx="${idx}"]:checked`).forEach(el => marcadas.add(Number(el.dataset.tid)));
+  const tareasRealizadas = d.tareas.map(t => ({ parte: t.parte, actividad: t.actividad, frecuencia: t.frecuencia, hecho: marcadas.has(t.id) }));
+
+  const { error } = await sbProg.from('paradas_realizadas').insert({
+    fecha: d.fecha, fecha_programada: d.fecha, maquina_codigo: d.maquina.codigo, visita_num: d.visitaNum,
+    aplico_trimestral: d.aplica.trimestral, aplico_semestral: d.aplica.semestral, aplico_anual: d.aplica.anual,
+    tareas_realizadas: tareasRealizadas, creado_por: usuario,
+  });
+  const msg = document.getElementById('progMsgHoy');
+  if (error) { if (msg) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; } return; }
+  await sbProg.from('maquinas_programa').update({ ultima_visita: d.fecha }).eq('codigo', d.maquina.codigo);
+  toast('✓ Mantenimiento registrado');
+  await cargarPreventivo();
+  await cargarBannerPreventivoHoy();
+}
+
+function pintarListaProg() {
+  const cont = document.getElementById('progLista');
+  if (!progMaquinas.length) { cont.innerHTML = '<div class="empty-state">No hay máquinas cargadas.</div>'; return; }
+  const hoy = progHoyISO();
+  cont.innerHTML = `<div class="prog-tabla-wrap"><table class="prog-tabla"><thead><tr>
+      <th>Orden</th><th>Sector</th><th>Código</th><th>Nombre</th><th>Última visita</th><th>Partes</th>
+    </tr></thead><tbody>` +
+    progMaquinas.map(m => {
+      const dias = m.ultima_visita ? progDiasSinVisita(m, hoy) + ' d' : '—';
+      const partes = (progTareasPorMaquina[m.codigo] || []).map(t => t.parte).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+      return `<tr>
+        <td>${m.orden}</td><td><span class="prog-badge">${esc(m.sector)}</span></td>
+        <td>${esc(m.codigo)}</td><td>${esc(m.nombre)}</td>
+        <td>${m.ultima_visita ? progFormatoFecha(m.ultima_visita) + ' (' + dias + ')' : 'Sin visitas'}</td>
+        <td style="color:var(--text-dim);">${esc(partes || '—')}</td>
+      </tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+
+async function guardarFechaInicioProg() {
+  const val = document.getElementById('progFechaInicio').value;
+  const msg = document.getElementById('progMsgFecha');
+  if (!val) { msg.textContent = 'Elegí una fecha.'; msg.className = 'prog-msg err'; return; }
+  const { error } = await sbProg.from('ronda_config').update({ fecha_inicio: val }).eq('id', 1);
+  if (error) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; return; }
+  msg.textContent = 'Guardado (fecha de referencia informativa).'; msg.className = 'prog-msg ok';
+}
+
+async function agregarMaquinaProg() {
+  const codigo = document.getElementById('progCodigo').value.trim();
+  const nombre = document.getElementById('progNombre').value.trim();
+  const sector = document.getElementById('progSector').value;
+  const partesRaw = document.getElementById('progPartes').value.trim();
+  const fecha = document.getElementById('progFechaMaquina').value || null;
+  const msg = document.getElementById('progMsgAlta');
+
+  if (!codigo || !nombre) { msg.textContent = 'Completá código y nombre.'; msg.className = 'prog-msg err'; return; }
+
+  const orden = progMaquinas.length ? Math.max(...progMaquinas.map(m => m.orden)) + 1 : 1;
+  const { error } = await sbProg.from('maquinas_programa').insert({
+    codigo, nombre, sector, orden, grupo_origen: 'N/A (máquina nueva)', ultima_visita: fecha,
+  });
+  if (error) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; return; }
+
+  if (partesRaw) {
+    const partes = partesRaw.split(',').map(p => p.trim()).filter(Boolean);
+    const filas = partes.map(p => ({ maquina_codigo: codigo, parte: p, actividad: 'Inspección general y lubricación (ajustar según corresponda).', frecuencia: 'Mensual' }));
+    if (filas.length) await sbProg.from('tareas_maquina').insert(filas);
+  }
+
+  msg.textContent = 'Máquina agregada.'; msg.className = 'prog-msg ok';
+  document.getElementById('progCodigo').value = '';
+  document.getElementById('progNombre').value = '';
+  document.getElementById('progPartes').value = '';
+  document.getElementById('progFechaMaquina').value = '';
+  await cargarPreventivo();
 }
 
 // ── PAUSAR ──
