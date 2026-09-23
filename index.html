@@ -450,11 +450,13 @@
     <div class="prog-toggle no-print">
       <button id="progBtnAgenda" class="active" onclick="progMostrarVista('agenda')">📅 Agenda día a día</button>
       <button id="progBtnLista" onclick="progMostrarVista('lista')">📋 Programa completo</button>
+      <button id="progBtnHistorial" onclick="progMostrarVista('historial')">📜 Historial de visitas</button>
       <button onclick="window.print()">🖨 Imprimir</button>
     </div>
 
     <div id="progAgenda"></div>
     <div id="progLista" style="display:none"></div>
+    <div id="progHistorial" style="display:none"></div>
   </div>
   <!-- ── TAB STOCK ── -->
   <div class="tab-content" id="tab-stock">
@@ -643,6 +645,7 @@ let progMaquinas = [];
 let progTareasPorMaquina = {};
 let progVisitCounts = {};
 let progVistaActual = 'agenda';
+let progSeleccionHoyCodigo = null; // si se eligió una máquina distinta a la que "tocaba" hoy
 
 function progHoyISO() {
   const d = new Date();
@@ -707,28 +710,39 @@ function progMostrarVista(v) {
   progVistaActual = v;
   document.getElementById('progBtnAgenda').classList.toggle('active', v === 'agenda');
   document.getElementById('progBtnLista').classList.toggle('active', v === 'lista');
+  document.getElementById('progBtnHistorial').classList.toggle('active', v === 'historial');
   document.getElementById('progAgenda').style.display = v === 'agenda' ? 'block' : 'none';
   document.getElementById('progLista').style.display = v === 'lista' ? 'block' : 'none';
-  if (v === 'agenda') pintarAgendaProg(); else pintarListaProg();
+  document.getElementById('progHistorial').style.display = v === 'historial' ? 'block' : 'none';
+  if (v === 'agenda') pintarAgendaProg();
+  else if (v === 'lista') pintarListaProg();
+  else if (v === 'historial') cargarHistorialProg();
 }
 
 // Proyecta los próximos N días hábiles: cada día "toca" la máquina activa
 // que hace más tiempo no recibe visita (simula el avance sin escribir nada).
-function progProyectarAgenda(n) {
+// forzarCodigoHoy: si se eligió manualmente otra máquina para HOY (día 0),
+// se respeta esa elección y el resto de los días se recalcula a partir de ahí
+// — la máquina salteada simplemente sigue "atrasada" y vuelve a proponerse sola.
+function progProyectarAgenda(n, forzarCodigoHoy) {
   const activas = progMaquinas.filter(m => m.activa !== false).map(m => ({ ...m }));
   const counts = { ...progVisitCounts };
   let fecha = progHoyISO();
+  if (new Date(fecha + 'T00:00:00').getDay() === 0) fecha = progSumarDiasHabiles(fecha, 1).toISOString().slice(0, 10);
   const dias = [];
   for (let i = 0; i < n; i++) {
     if (i > 0) fecha = progSumarDiasHabiles(fecha, 1).toISOString().slice(0, 10);
-    else if (new Date(fecha + 'T00:00:00').getDay() === 0) fecha = progSumarDiasHabiles(fecha, 1).toISOString().slice(0, 10);
 
-    activas.sort((a, b) => {
-      const da = progDiasSinVisita(a, fecha), db = progDiasSinVisita(b, fecha);
-      if (da !== db) return db - da;
-      return (a.orden || 0) - (b.orden || 0);
-    });
-    const m = activas[0];
+    let m = null;
+    if (i === 0 && forzarCodigoHoy) m = activas.find(x => x.codigo === forzarCodigoHoy) || null;
+    if (!m) {
+      activas.sort((a, b) => {
+        const da = progDiasSinVisita(a, fecha), db = progDiasSinVisita(b, fecha);
+        if (da !== db) return db - da;
+        return (a.orden || 0) - (b.orden || 0);
+      });
+      m = activas[0];
+    }
     if (!m) break;
     const visitaNum = (counts[m.codigo] || 0) + 1;
     const aplica = progFrecuenciasQueAplican(visitaNum);
@@ -743,8 +757,19 @@ function progProyectarAgenda(n) {
 function pintarAgendaProg() {
   const cont = document.getElementById('progAgenda');
   if (!progMaquinas.length) { cont.innerHTML = '<div class="empty-state">Todavía no hay máquinas cargadas en el programa.</div>'; return; }
-  const dias = progProyectarAgenda(PROG_DIAS_AGENDA);
+
+  const debidaHoy = progOrdenarPorPrioridad(progMaquinas)[0];
+  if (progSeleccionHoyCodigo && !progMaquinas.find(m => m.codigo === progSeleccionHoyCodigo && m.activa !== false)) progSeleccionHoyCodigo = null;
+  const dias = progProyectarAgenda(PROG_DIAS_AGENDA, progSeleccionHoyCodigo);
   const hoy = progHoyISO();
+  const esSwap = !!(progSeleccionHoyCodigo && dias[0] && dias[0].maquina.codigo !== debidaHoy.codigo);
+
+  // candidatas para "máquina contigua": mismo criterio que el resto del sistema, ordenadas por cercanía en el orden de ronda
+  const contiguas = [...progMaquinas]
+    .filter(m => m.activa !== false && m.codigo !== debidaHoy.codigo)
+    .sort((a, b) => Math.abs((a.orden || 0) - debidaHoy.orden) - Math.abs((b.orden || 0) - debidaHoy.orden))
+    .slice(0, 8);
+
   cont.innerHTML = dias.map((d, idx) => {
     const esHoy = d.fecha === hoy;
     const tareasHtml = d.tareas.length ? d.tareas.map(t => `<label class="prog-task">
@@ -757,12 +782,35 @@ function pintarAgendaProg() {
         <div><strong>Marcar todas hechas</strong></div>
       </label>` : '';
 
+    let cambioHtml = '';
+    if (esHoy && !esSwap) {
+      cambioHtml = `<details class="no-print" style="margin:8px 0;">
+        <summary style="cursor:pointer;color:var(--baja);font-weight:700;font-size:12.5px;">No se puede parar hoy → elegir máquina contigua</summary>
+        <div class="prog-row" style="margin-top:8px;">
+          ${contiguas.map(m => `<button class="filtro-btn" onclick="progElegirMaquinaHoy('${esc(m.codigo)}')">${esc(m.codigo)} · ${esc(m.nombre)}</button>`).join('')}
+        </div>
+      </details>`;
+    } else if (esHoy && esSwap) {
+      cambioHtml = `<div class="no-print" style="background:rgba(245,158,11,0.10);border:1px solid var(--media);border-radius:8px;padding:10px 12px;margin:8px 0;">
+        <div style="font-size:12.5px;margin-bottom:6px;">
+          Vas a registrar el mantenimiento de <strong>${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</strong> en reemplazo de
+          <strong>${esc(debidaHoy.codigo)} · ${esc(debidaHoy.nombre)}</strong>, que queda pendiente para la próxima oportunidad.
+        </div>
+        <div class="prog-field" style="margin-bottom:6px;">
+          <label>Motivo del cambio</label>
+          <input id="progMotivoCambio" placeholder="Ej: pedido grande del cliente X en curso en la ${esc(debidaHoy.codigo)}">
+        </div>
+        <button class="filtro-btn" onclick="progVolverOriginalHoy()">Volver a la máquina original</button>
+      </div>`;
+    }
+
     return `<div class="prog-day ${esHoy ? 'hoy' : ''}" data-dayidx="${idx}">
       <div class="prog-day-head">
         <span class="prog-day-fecha">${progFormatoFecha(d.fecha)} ${esHoy ? '<span class="prog-tag-hoy">HOY</span>' : ''}</span>
         <span><span class="prog-badge">${esc(d.maquina.sector)}</span> ${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</span>
       </div>
       <div class="prog-sub">Visita N° ${d.visitaNum}${extra ? ' · corresponde ' + extra : ' · solo tareas de todas las visitas'}</div>
+      ${cambioHtml}
       ${marcarTodasHtml}
       ${tareasHtml}
       ${esHoy ? `<div class="no-print" style="margin-top:10px;">
@@ -773,27 +821,53 @@ function pintarAgendaProg() {
   }).join('');
 }
 
+function progElegirMaquinaHoy(codigo) {
+  progSeleccionHoyCodigo = codigo;
+  pintarAgendaProg();
+}
+function progVolverOriginalHoy() {
+  progSeleccionHoyCodigo = null;
+  pintarAgendaProg();
+}
+
 function progMarcarTodas(idx, marcar) {
   document.querySelectorAll(`.prog-chk-tarea[data-dayidx="${idx}"]`).forEach(el => { el.checked = marcar; });
 }
 
 async function progGuardarHoy(idx) {
   if (!usuario) { toast('Elegí primero quién sos (arriba en Tareas o Compras)'); return; }
-  const dias = progProyectarAgenda(PROG_DIAS_AGENDA);
+  const debidaHoy = progOrdenarPorPrioridad(progMaquinas)[0];
+  const dias = progProyectarAgenda(PROG_DIAS_AGENDA, progSeleccionHoyCodigo);
   const d = dias[idx];
+  const esSwap = !!(progSeleccionHoyCodigo && d.maquina.codigo !== debidaHoy.codigo);
+  const msg = document.getElementById('progMsgHoy');
+
+  let motivoCambio = null;
+  if (esSwap) {
+    const el = document.getElementById('progMotivoCambio');
+    motivoCambio = el ? el.value.trim() : '';
+    if (!motivoCambio) {
+      msg.textContent = 'Contá brevemente por qué se cambió de máquina.'; msg.className = 'prog-msg err';
+      return;
+    }
+  }
+
   const marcadas = new Set();
   document.querySelectorAll(`.prog-chk-tarea[data-dayidx="${idx}"]:checked`).forEach(el => marcadas.add(Number(el.dataset.tid)));
   const tareasRealizadas = d.tareas.map(t => ({ parte: t.parte, actividad: t.actividad, frecuencia: t.frecuencia, hecho: marcadas.has(t.id) }));
 
   const { error } = await sb.from('paradas_realizadas').insert({
-    fecha: d.fecha, fecha_programada: d.fecha, maquina_codigo: d.maquina.codigo, visita_num: d.visitaNum,
+    fecha: d.fecha, fecha_programada: d.fecha, maquina_codigo: d.maquina.codigo,
+    maquina_reemplazada_codigo: esSwap ? debidaHoy.codigo : null,
+    motivo_cambio: esSwap ? motivoCambio : null,
+    visita_num: d.visitaNum,
     aplico_trimestral: d.aplica.trimestral, aplico_semestral: d.aplica.semestral, aplico_anual: d.aplica.anual,
     tareas_realizadas: tareasRealizadas, creado_por: usuario,
   });
-  const msg = document.getElementById('progMsgHoy');
   if (error) { if (msg) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; } return; }
   await sb.from('maquinas_programa').update({ ultima_visita: d.fecha }).eq('codigo', d.maquina.codigo);
   toast('✓ Mantenimiento registrado');
+  progSeleccionHoyCodigo = null;
   await cargarPreventivo();
   await cargarBannerPreventivoHoy();
 }
@@ -833,6 +907,67 @@ async function progEditarUltimaVisita(codigo) {
   if (error) { toast('❌ Error guardando'); return; }
   toast('✓ Fecha corregida');
   await cargarPreventivo();
+}
+
+// ── HISTORIAL DE VISITAS (todas las máquinas, con fecha y tipo) ──
+let progHistorialData = null;
+
+async function cargarHistorialProg() {
+  const cont = document.getElementById('progHistorial');
+  cont.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const { data, error } = await sb.from('paradas_realizadas').select('*')
+    .order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(500);
+  if (error) { cont.innerHTML = '<div class="empty-state">Error cargando el historial.</div>'; return; }
+  progHistorialData = data || [];
+  renderizarHistorialProg();
+}
+
+function renderizarHistorialProg() {
+  const cont = document.getElementById('progHistorial');
+  if (!progHistorialData) return;
+
+  const filtroSel = document.getElementById('progHistFiltroMaquina');
+  const filtro = filtroSel ? filtroSel.value : '';
+  const filas = filtro ? progHistorialData.filter(p => p.maquina_codigo === filtro) : progHistorialData;
+
+  const mapaMaquinas = {};
+  progMaquinas.forEach(m => { mapaMaquinas[m.codigo] = m; });
+
+  const selectorHtml = `<div class="filtros-bar">
+      <select id="progHistFiltroMaquina" class="usuario-select" onchange="renderizarHistorialProg()" style="min-width:240px;">
+        <option value="">Todas las máquinas</option>
+        ${progMaquinas.map(m => `<option value="${esc(m.codigo)}" ${filtro === m.codigo ? 'selected' : ''}>${esc(m.codigo)} · ${esc(m.nombre)}</option>`).join('')}
+      </select>
+      <span style="font-size:12px;color:var(--text-dim);">${filas.length} visita${filas.length === 1 ? '' : 's'}</span>
+    </div>`;
+
+  if (!progHistorialData.length) {
+    cont.innerHTML = selectorHtml + '<div class="empty-state">Todavía no hay mantenimientos registrados.</div>';
+    return;
+  }
+
+  const filasHtml = filas.map(p => {
+    const m = mapaMaquinas[p.maquina_codigo] || {};
+    const tareas = p.tareas_realizadas || [];
+    const hechas = tareas.filter(t => t.hecho).length;
+    const tipo = ['Mensual', p.aplico_trimestral && 'Trimestral', p.aplico_semestral && 'Semestral', p.aplico_anual && 'Anual'].filter(Boolean).join(' + ');
+    const swap = p.maquina_reemplazada_codigo
+      ? `<div class="meta" style="color:var(--media);">reemplazó a ${esc(p.maquina_reemplazada_codigo)}${p.motivo_cambio ? ': ' + esc(p.motivo_cambio) : ''}</div>` : '';
+    return `<tr>
+      <td style="white-space:nowrap;">${progFormatoFecha(p.fecha)}</td>
+      <td><span class="prog-badge">${esc(m.sector || '—')}</span></td>
+      <td>${esc(p.maquina_codigo)}</td>
+      <td>${esc(m.nombre || '—')}</td>
+      <td>N° ${p.visita_num ?? '—'}</td>
+      <td>${esc(tipo || '—')}</td>
+      <td>${tareas.length ? hechas + '/' + tareas.length + ' hechas' : 'sin detalle'}${swap}</td>
+      <td style="color:var(--text-dim);">${esc(p.creado_por || '—')}</td>
+    </tr>`;
+  }).join('');
+
+  cont.innerHTML = selectorHtml + `<div class="prog-tabla-wrap"><table class="prog-tabla"><thead><tr>
+      <th>Fecha</th><th>Sector</th><th>Código</th><th>Nombre</th><th>Visita</th><th>Tipo de mantenimiento</th><th>Tareas</th><th>Registrado por</th>
+    </tr></thead><tbody>${filasHtml || '<tr><td colspan="8" class="empty-state">Nada coincide con ese filtro.</td></tr>'}</tbody></table></div>`;
 }
 
 async function guardarFechaInicioProg() {
