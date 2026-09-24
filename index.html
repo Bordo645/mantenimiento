@@ -292,6 +292,8 @@
     .prog-tabla { width:100%; border-collapse:collapse; font-size:12.5px; }
     .prog-tabla th { text-align:left; padding:8px 10px; color:var(--text-dim); text-transform:uppercase; font-size:10.5px; letter-spacing:.4px; border-bottom:1px solid var(--border-light); }
     .prog-tabla td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+    .prog-obs-box { border-top:1px dashed var(--border); margin-top:12px; padding-top:10px; }
+    .prog-obs-item { display:flex; align-items:center; gap:8px; font-size:13px; padding:6px 0; border-bottom:1px solid var(--border); }
 
     @media print {
       header, .tabs, .add-form, .filtros-bar, .prog-toggle, .prog-config, .prev-nav, .live-label, #toast, .no-print { display:none !important; }
@@ -451,12 +453,14 @@
       <button id="progBtnAgenda" class="active" onclick="progMostrarVista('agenda')">📅 Agenda día a día</button>
       <button id="progBtnLista" onclick="progMostrarVista('lista')">📋 Programa completo</button>
       <button id="progBtnHistorial" onclick="progMostrarVista('historial')">📜 Historial de visitas</button>
+      <button id="progBtnObs" onclick="progMostrarVista('observaciones')">📝 Observaciones</button>
       <button onclick="window.print()">🖨 Imprimir</button>
     </div>
 
     <div id="progAgenda"></div>
     <div id="progLista" style="display:none"></div>
     <div id="progHistorial" style="display:none"></div>
+    <div id="progObsTab" style="display:none"></div>
   </div>
   <!-- ── TAB STOCK ── -->
   <div class="tab-content" id="tab-stock">
@@ -658,6 +662,8 @@ let progVistaActual = 'agenda';
 let progSeleccionHoyCodigo = null; // si se eligió una máquina distinta a la que "tocaba" hoy
 let progVisitasHoy = []; // visitas ya registradas hoy (cualquier máquina)
 let progMostrarOtraHoy = false; // forzar a mostrar el formulario aunque ya haya una visita hoy
+let progFiltroSectorSwap = 'todas'; // filtro de sector al elegir otra máquina para hoy
+let progObsPendientes = []; // observaciones (hacer/cambiar/comprar) no resueltas, de todas las máquinas
 
 function progHoyISO() {
   const d = new Date();
@@ -675,6 +681,9 @@ function progFormatoFecha(iso) {
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'short' });
 }
 function progDiasSinVisita(m, fechaISOStr) {
+  // Si está pospuesta ("omitir_hasta" en el futuro), se la trata como recién
+  // visitada para que no vuelva a proponerse hasta esa fecha.
+  if (m.omitir_hasta && m.omitir_hasta > fechaISOStr) return -1;
   if (!m.ultima_visita) return Infinity;
   const a = new Date(m.ultima_visita + 'T00:00:00');
   const b = new Date(fechaISOStr + 'T00:00:00');
@@ -718,6 +727,9 @@ async function cargarPreventivo() {
   const { data: visitasHoyData } = await sb.from('paradas_realizadas').select('*').eq('fecha', progHoyISO());
   progVisitasHoy = visitasHoyData || [];
 
+  const { data: obsData } = await sb.from('observaciones').select('*').neq('estado', 'resuelto').order('created_at', { ascending: false });
+  progObsPendientes = obsData || [];
+
   progMostrarVista(progVistaActual);
 }
 
@@ -726,12 +738,15 @@ function progMostrarVista(v) {
   document.getElementById('progBtnAgenda').classList.toggle('active', v === 'agenda');
   document.getElementById('progBtnLista').classList.toggle('active', v === 'lista');
   document.getElementById('progBtnHistorial').classList.toggle('active', v === 'historial');
+  document.getElementById('progBtnObs').classList.toggle('active', v === 'observaciones');
   document.getElementById('progAgenda').style.display = v === 'agenda' ? 'block' : 'none';
   document.getElementById('progLista').style.display = v === 'lista' ? 'block' : 'none';
   document.getElementById('progHistorial').style.display = v === 'historial' ? 'block' : 'none';
+  document.getElementById('progObsTab').style.display = v === 'observaciones' ? 'block' : 'none';
   if (v === 'agenda') pintarAgendaProg();
   else if (v === 'lista') pintarListaProg();
   else if (v === 'historial') cargarHistorialProg();
+  else if (v === 'observaciones') cargarObsTab();
 }
 
 // Proyecta los próximos N días hábiles: cada día "toca" la máquina activa
@@ -781,11 +796,13 @@ function pintarAgendaProg() {
   const dias = progProyectarAgenda(PROG_DIAS_AGENDA, progSeleccionHoyCodigo);
   const esSwap = !!(progSeleccionHoyCodigo && dias[0] && dias[0].maquina.codigo !== debidaHoy.codigo);
 
-  // candidatas para "máquina contigua": mismo criterio que el resto del sistema, ordenadas por cercanía en el orden de ronda
-  const contiguas = [...progMaquinas]
+  // candidatas para elegir otra máquina hoy: todas las activas salvo la que toca,
+  // opcionalmente filtradas por sector
+  const sectoresDisponibles = [...new Set(progMaquinas.filter(m => m.activa !== false).map(m => m.sector))].sort();
+  const candidatas = progMaquinas
     .filter(m => m.activa !== false && m.codigo !== debidaHoy.codigo)
-    .sort((a, b) => Math.abs((a.orden || 0) - debidaHoy.orden) - Math.abs((b.orden || 0) - debidaHoy.orden))
-    .slice(0, 8);
+    .filter(m => progFiltroSectorSwap === 'todas' || m.sector === progFiltroSectorSwap)
+    .sort((a, b) => a.sector.localeCompare(b.sector) || (a.orden || 0) - (b.orden || 0));
 
   let html = '';
 
@@ -798,7 +815,7 @@ function pintarAgendaProg() {
       <button class="filtro-btn" onclick="progMostrarOtraHoy=true;pintarAgendaProg();">+ Registrar otra visita hoy (excepcional)</button>
     </div>`;
   } else {
-    html += progRenderDiaCard(dias[0], 0, true, debidaHoy, esSwap, contiguas);
+    html += progRenderDiaCard(dias[0], 0, true, debidaHoy, esSwap, candidatas, sectoresDisponibles);
   }
 
   html += dias.slice(1).map((d, i) => progRenderDiaCard(d, i + 1, false)).join('');
@@ -822,7 +839,7 @@ function progRenderResumenHoy(p, mapaMaquinas) {
   </div>`;
 }
 
-function progRenderDiaCard(d, idx, esHoy, debidaHoy, esSwap, contiguas) {
+function progRenderDiaCard(d, idx, esHoy, debidaHoy, esSwap, candidatas, sectoresDisponibles) {
   const tareasHtml = d.tareas.length ? d.tareas.map(t => `<label class="prog-task">
       <input type="checkbox" data-tid="${t.id}" ${esHoy ? '' : 'disabled'} class="prog-chk-tarea" data-dayidx="${idx}" />
       <div><div>${esc(t.parte)} — ${esc(t.actividad)}</div><div class="meta">${esc(t.frecuencia)}</div></div>
@@ -835,23 +852,40 @@ function progRenderDiaCard(d, idx, esHoy, debidaHoy, esSwap, contiguas) {
 
   let cambioHtml = '';
   if (esHoy && !esSwap) {
+    const chipsSector = ['todas', ...sectoresDisponibles].map(s => {
+      const label = s === 'todas' ? 'Todas' : s;
+      const activo = progFiltroSectorSwap === s;
+      return `<button class="filtro-btn ${activo ? 'active' : ''}" onclick="progFiltrarSectorSwap('${esc(s)}')">${esc(label)}</button>`;
+    }).join('');
     cambioHtml = `<details class="no-print" style="margin:8px 0;">
-      <summary style="cursor:pointer;color:var(--baja);font-weight:700;font-size:12.5px;">No se puede parar hoy → elegir máquina contigua</summary>
-      <div class="prog-row" style="margin-top:8px;">
-        ${contiguas.map(m => `<button class="filtro-btn" onclick="progElegirMaquinaHoy('${esc(m.codigo)}')">${esc(m.codigo)} · ${esc(m.nombre)}</button>`).join('')}
+      <summary style="cursor:pointer;color:var(--baja);font-weight:700;font-size:12.5px;">No se puede parar hoy → elegir otra máquina</summary>
+      <div style="margin-top:10px;">
+        <div class="prog-row" style="margin-bottom:8px;">${chipsSector}</div>
+        <div class="prog-row">
+          ${candidatas.map(m => `<button class="filtro-btn" onclick="progElegirMaquinaHoy('${esc(m.codigo)}')">${esc(m.codigo)} · ${esc(m.nombre)}</button>`).join('') || '<span class="prog-sub">No hay otras máquinas en ese sector.</span>'}
+        </div>
       </div>
     </details>`;
   } else if (esHoy && esSwap) {
     cambioHtml = `<div class="no-print" style="background:rgba(245,158,11,0.10);border:1px solid var(--media);border-radius:8px;padding:10px 12px;margin:8px 0;">
       <div style="font-size:12.5px;margin-bottom:6px;">
         Vas a registrar el mantenimiento de <strong>${esc(d.maquina.codigo)} · ${esc(d.maquina.nombre)}</strong> en reemplazo de
-        <strong>${esc(debidaHoy.codigo)} · ${esc(debidaHoy.nombre)}</strong>, que queda pendiente para la próxima oportunidad.
+        <strong>${esc(debidaHoy.codigo)} · ${esc(debidaHoy.nombre)}</strong>, que queda pendiente.
       </div>
       <div class="prog-field" style="margin-bottom:6px;">
         <label>Motivo del cambio</label>
         <input id="progMotivoCambio" placeholder="Ej: pedido grande del cliente X en curso en la ${esc(debidaHoy.codigo)}">
       </div>
-      <button class="filtro-btn" onclick="progVolverOriginalHoy()">Volver a la máquina original</button>
+      <div class="prog-field" style="margin-bottom:6px;">
+        <label>¿Cuándo volver a proponer ${esc(debidaHoy.codigo)}? (opcional)</label>
+        <div class="prog-row" style="margin-bottom:6px;">
+          <button class="filtro-btn" onclick="progPosponer(0)">Apenas se pueda (por defecto)</button>
+          <button class="filtro-btn" onclick="progPosponer(3)">En 3 días</button>
+          <button class="filtro-btn" onclick="progPosponer(7)">En 1 semana</button>
+        </div>
+        <input type="date" id="progPosponerFecha" />
+      </div>
+      <button class="filtro-btn" onclick="progVolverOriginalHoy()">Cancelar, volver a ${esc(debidaHoy.codigo)}</button>
     </div>`;
   }
 
@@ -864,6 +898,7 @@ function progRenderDiaCard(d, idx, esHoy, debidaHoy, esSwap, contiguas) {
     ${cambioHtml}
     ${marcarTodasHtml}
     ${tareasHtml}
+    ${esHoy ? progObservacionesHtml(d.maquina.codigo) : ''}
     ${esHoy ? `<div class="no-print" style="margin-top:10px;">
       <button class="btn-add" style="background:var(--verde)" onclick="progGuardarHoy(${idx})">Guardar visita de hoy</button>
       <span id="progMsgHoy" class="prog-msg"></span>
@@ -871,12 +906,77 @@ function progRenderDiaCard(d, idx, esHoy, debidaHoy, esSwap, contiguas) {
   </div>`;
 }
 
+function progFiltrarSectorSwap(sector) {
+  progFiltroSectorSwap = sector;
+  pintarAgendaProg();
+}
+
 function progElegirMaquinaHoy(codigo) {
   progSeleccionHoyCodigo = codigo;
+  progFiltroSectorSwap = 'todas';
   pintarAgendaProg();
 }
 function progVolverOriginalHoy() {
   progSeleccionHoyCodigo = null;
+  pintarAgendaProg();
+}
+function progPosponer(dias) {
+  const el = document.getElementById('progPosponerFecha');
+  if (!el) return;
+  if (dias === 0) { el.value = ''; return; }
+  const f = progSumarDiasHabiles(progHoyISO(), dias);
+  el.value = f.toISOString().slice(0, 10);
+}
+
+// ── Observaciones rápidas (hacer / cambiar / comprar) al registrar el día ──
+function progObservacionesHtml(codigo) {
+  const pendientes = progObsPendientes.filter(o => o.maquina_codigo === codigo);
+  const listaHtml = pendientes.length ? pendientes.map(o => `
+      <div class="prog-obs-item">
+        <span class="pill pill-${esc(o.prioridad)}">${esc(o.tipo).toUpperCase()}</span>
+        ${esc(o.descripcion)}
+      </div>`).join('') : '<div class="empty-state" style="padding:6px 0;">Sin observaciones pendientes para esta máquina.</div>';
+
+  return `<div class="prog-obs-box no-print">
+    <h3 style="margin:12px 0 6px;font-size:13.5px;color:var(--text);">📝 Observaciones — hacer, cambiar o comprar</h3>
+    ${listaHtml}
+    <div class="prog-row" style="margin-top:8px;">
+      <select id="progObsTipo_${esc(codigo)}" class="usuario-select">
+        <option value="hacer">Hacer</option>
+        <option value="cambiar">Cambiar</option>
+        <option value="comprar">Comprar</option>
+      </select>
+      <select id="progObsPrioridad_${esc(codigo)}" class="usuario-select">
+        <option value="media">Prioridad media</option>
+        <option value="baja">Prioridad baja</option>
+        <option value="alta">Prioridad alta</option>
+      </select>
+    </div>
+    <div class="prog-row" style="margin-top:6px;align-items:flex-start;">
+      <input id="progObsDesc_${esc(codigo)}" style="flex:1;min-width:220px;" placeholder="Ej: cambiar rodamiento del bobinador, comprar correa de tapete..." />
+      <button class="filtro-btn" onclick="progAgregarObservacion('${esc(codigo)}')">+ Agregar</button>
+    </div>
+    <span id="progObsMsg_${esc(codigo)}" class="prog-msg"></span>
+  </div>`;
+}
+
+async function progAgregarObservacion(codigo) {
+  if (!usuario) { toast('Elegí primero quién sos (arriba en Tareas o Compras)'); return; }
+  const tipo = document.getElementById(`progObsTipo_${codigo}`).value;
+  const prioridad = document.getElementById(`progObsPrioridad_${codigo}`).value;
+  const descEl = document.getElementById(`progObsDesc_${codigo}`);
+  const descripcion = descEl.value.trim();
+  const msg = document.getElementById(`progObsMsg_${codigo}`);
+  if (!descripcion) { msg.textContent = 'Escribí una descripción.'; msg.className = 'prog-msg err'; return; }
+
+  const { error } = await sb.from('observaciones').insert({
+    maquina_codigo: codigo, fecha: progHoyISO(), tipo, prioridad, descripcion, creado_por: usuario,
+  });
+  if (error) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; return; }
+  descEl.value = '';
+  toast('✓ Observación agregada');
+  const { data: obsData } = await sb.from('observaciones').select('*').neq('estado', 'resuelto').order('created_at', { ascending: false });
+  progObsPendientes = obsData || [];
   pintarAgendaProg();
 }
 
@@ -893,6 +993,7 @@ async function progGuardarHoy(idx) {
   const msg = document.getElementById('progMsgHoy');
 
   let motivoCambio = null;
+  let posponerFecha = null;
   if (esSwap) {
     const el = document.getElementById('progMotivoCambio');
     motivoCambio = el ? el.value.trim() : '';
@@ -900,6 +1001,8 @@ async function progGuardarHoy(idx) {
       msg.textContent = 'Contá brevemente por qué se cambió de máquina.'; msg.className = 'prog-msg err';
       return;
     }
+    const fechaEl = document.getElementById('progPosponerFecha');
+    posponerFecha = fechaEl && fechaEl.value ? fechaEl.value : null;
   }
 
   const marcadas = new Set();
@@ -916,9 +1019,13 @@ async function progGuardarHoy(idx) {
   });
   if (error) { if (msg) { msg.textContent = 'Error: ' + error.message; msg.className = 'prog-msg err'; } return; }
   await sb.from('maquinas_programa').update({ ultima_visita: d.fecha }).eq('codigo', d.maquina.codigo);
+  if (esSwap && posponerFecha) {
+    await sb.from('maquinas_programa').update({ omitir_hasta: posponerFecha }).eq('codigo', debidaHoy.codigo);
+  }
   toast('✓ Mantenimiento registrado');
   progSeleccionHoyCodigo = null;
   progMostrarOtraHoy = false;
+  progFiltroSectorSwap = 'todas';
   await cargarPreventivo();
   await cargarBannerPreventivoHoy();
 }
@@ -933,6 +1040,8 @@ function pintarListaProg() {
     progMaquinas.map(m => {
       const dias = m.ultima_visita ? progDiasSinVisita(m, hoy) + ' d' : '—';
       const partes = (progTareasPorMaquina[m.codigo] || []).map(t => t.parte).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+      const pospuesta = m.omitir_hasta && m.omitir_hasta > hoy
+        ? `<div><span class="pill pill-media" style="cursor:pointer;" title="Click para quitar la postergación" onclick="progQuitarPosposicion('${esc(m.codigo)}')">⏸ pospuesta hasta ${progFormatoFecha(m.omitir_hasta)}</span></div>` : '';
       return `<tr>
         <td>${m.orden}</td><td><span class="prog-badge">${esc(m.sector)}</span></td>
         <td>${esc(m.codigo)}</td><td>${esc(m.nombre)}</td>
@@ -941,10 +1050,18 @@ function pintarListaProg() {
             <span id="progUV_${esc(m.codigo)}">${m.ultima_visita ? progFormatoFecha(m.ultima_visita) + ' (' + dias + ')' : 'Sin visitas'}</span>
             <button class="stock-btn no-print" title="Corregir fecha" onclick="progEditarUltimaVisita('${esc(m.codigo)}')">✎</button>
           </div>
+          ${pospuesta}
         </td>
         <td style="color:var(--text-dim);">${esc(partes || '—')}</td>
       </tr>`;
     }).join('') + '</tbody></table></div>';
+}
+
+async function progQuitarPosposicion(codigo) {
+  const { error } = await sb.from('maquinas_programa').update({ omitir_hasta: null }).eq('codigo', codigo);
+  if (error) { toast('❌ Error'); return; }
+  toast('✓ Postergación quitada');
+  await cargarPreventivo();
 }
 
 async function progEditarUltimaVisita(codigo) {
@@ -1019,6 +1136,82 @@ function renderizarHistorialProg() {
   cont.innerHTML = selectorHtml + `<div class="prog-tabla-wrap"><table class="prog-tabla"><thead><tr>
       <th>Fecha</th><th>Sector</th><th>Código</th><th>Nombre</th><th>Visita</th><th>Tipo de mantenimiento</th><th>Tareas</th><th>Registrado por</th>
     </tr></thead><tbody>${filasHtml || '<tr><td colspan="8" class="empty-state">Nada coincide con ese filtro.</td></tr>'}</tbody></table></div>`;
+}
+
+// ── PESTAÑA OBSERVACIONES (todas las máquinas, con filtro de estado) ──
+let progObsTabData = [];
+
+async function cargarObsTab() {
+  const cont = document.getElementById('progObsTab');
+  cont.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const { data, error } = await sb.from('observaciones').select('*').order('created_at', { ascending: false }).limit(500);
+  if (error) { cont.innerHTML = '<div class="empty-state">Error cargando observaciones.</div>'; return; }
+  progObsTabData = data || [];
+  renderizarObsTab();
+}
+
+function renderizarObsTab() {
+  const cont = document.getElementById('progObsTab');
+  const filtroEstadoSel = document.getElementById('progObsFiltroEstado');
+  const filtroMaquinaSel = document.getElementById('progObsFiltroMaquina');
+  const filtroEstado = filtroEstadoSel ? filtroEstadoSel.value : 'pendiente';
+  const filtroMaquina = filtroMaquinaSel ? filtroMaquinaSel.value : '';
+
+  let filas = progObsTabData;
+  if (filtroEstado !== 'todas') filas = filas.filter(o => o.estado === filtroEstado);
+  if (filtroMaquina) filas = filas.filter(o => o.maquina_codigo === filtroMaquina);
+
+  const mapaMaquinas = {};
+  progMaquinas.forEach(m => { mapaMaquinas[m.codigo] = m; });
+
+  const selectorHtml = `<div class="filtros-bar">
+      <select id="progObsFiltroEstado" class="usuario-select" onchange="renderizarObsTab()">
+        <option value="pendiente" ${filtroEstado === 'pendiente' ? 'selected' : ''}>Pendientes</option>
+        <option value="en_proceso" ${filtroEstado === 'en_proceso' ? 'selected' : ''}>En proceso</option>
+        <option value="resuelto" ${filtroEstado === 'resuelto' ? 'selected' : ''}>Resueltas</option>
+        <option value="todas" ${filtroEstado === 'todas' ? 'selected' : ''}>Todas</option>
+      </select>
+      <select id="progObsFiltroMaquina" class="usuario-select" onchange="renderizarObsTab()" style="min-width:220px;">
+        <option value="">Todas las máquinas</option>
+        ${progMaquinas.map(m => `<option value="${esc(m.codigo)}" ${filtroMaquina === m.codigo ? 'selected' : ''}>${esc(m.codigo)} · ${esc(m.nombre)}</option>`).join('')}
+      </select>
+      <span style="font-size:12px;color:var(--text-dim);">${filas.length} observación${filas.length === 1 ? '' : 'es'}</span>
+    </div>`;
+
+  if (!filas.length) {
+    cont.innerHTML = selectorHtml + '<div class="empty-state">No hay observaciones para este filtro.</div>';
+    return;
+  }
+
+  const itemsHtml = filas.map(o => {
+    const m = mapaMaquinas[o.maquina_codigo] || {};
+    return `<div class="prog-day">
+      <div class="prog-day-head">
+        <span><span class="prog-badge">${esc(m.sector || '')}</span> ${esc(o.maquina_codigo)} · ${esc(m.nombre || '')}</span>
+        <span style="font-size:12px;color:var(--text-dim);">${progFormatoFecha(o.fecha)}</span>
+      </div>
+      <div class="prog-row" style="margin:4px 0;">
+        <span class="pill pill-${esc(o.prioridad)}">${esc(o.tipo).toUpperCase()}</span>
+        <span style="font-size:13px;">${esc(o.descripcion)}</span>
+      </div>
+      <div class="prog-row">
+        <span class="prog-sub" style="margin:0;">Estado: <strong>${esc(o.estado.replace('_', ' '))}</strong>${o.creado_por ? ' · ' + esc(o.creado_por) : ''}</span>
+        ${o.estado !== 'en_proceso' ? `<button class="filtro-btn" onclick="progCambiarEstadoObs('${o.id}','en_proceso')">Marcar en proceso</button>` : ''}
+        ${o.estado !== 'resuelto' ? `<button class="filtro-btn" onclick="progCambiarEstadoObs('${o.id}','resuelto')">Marcar resuelto</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  cont.innerHTML = selectorHtml + itemsHtml;
+}
+
+async function progCambiarEstadoObs(id, estado) {
+  const patch = { estado };
+  if (estado === 'resuelto') patch.resuelto_en = new Date().toISOString();
+  const { error } = await sb.from('observaciones').update(patch).eq('id', id);
+  if (error) { toast('❌ Error actualizando'); return; }
+  toast('✓ Actualizado');
+  await cargarObsTab();
 }
 
 async function guardarFechaInicioProg() {
