@@ -1038,7 +1038,17 @@ function pintarListaProg() {
       <th>Orden</th><th>Sector</th><th>Código</th><th>Nombre</th><th>Última visita</th><th>Partes</th>
     </tr></thead><tbody>` +
     progMaquinas.map(m => {
-      const dias = m.ultima_visita ? progDiasSinVisita(m, hoy) + ' d' : '—';
+      const dias = m.ultima_visita ? progDiasSinVisita(m, hoy) : null;
+      let indicador;
+      if (dias === null) {
+        indicador = '<span class="pill pill-alta">sin visitas</span>';
+      } else if (dias >= 30) {
+        indicador = `<span class="pill pill-alta">🔴 ${dias} d</span>`;
+      } else if (dias >= 15) {
+        indicador = `<span class="pill pill-media">🟠 ${dias} d</span>`;
+      } else {
+        indicador = `<span style="color:var(--text-dim);font-size:12px;">${dias} d</span>`;
+      }
       const partes = (progTareasPorMaquina[m.codigo] || []).map(t => t.parte).filter((v, i, a) => a.indexOf(v) === i).join(', ');
       const pospuesta = m.omitir_hasta && m.omitir_hasta > hoy
         ? `<div><span class="pill pill-media" style="cursor:pointer;" title="Click para quitar la postergación" onclick="progQuitarPosposicion('${esc(m.codigo)}')">⏸ pospuesta hasta ${progFormatoFecha(m.omitir_hasta)}</span></div>` : '';
@@ -1046,8 +1056,9 @@ function pintarListaProg() {
         <td>${m.orden}</td><td><span class="prog-badge">${esc(m.sector)}</span></td>
         <td>${esc(m.codigo)}</td><td>${esc(m.nombre)}</td>
         <td>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span id="progUV_${esc(m.codigo)}">${m.ultima_visita ? progFormatoFecha(m.ultima_visita) + ' (' + dias + ')' : 'Sin visitas'}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span id="progUV_${esc(m.codigo)}">${m.ultima_visita ? progFormatoFecha(m.ultima_visita) : 'Sin visitas'}</span>
+            ${indicador}
             <button class="stock-btn no-print" title="Corregir fecha" onclick="progEditarUltimaVisita('${esc(m.codigo)}')">✎</button>
           </div>
           ${pospuesta}
@@ -1096,7 +1107,15 @@ function renderizarHistorialProg() {
 
   const filtroSel = document.getElementById('progHistFiltroMaquina');
   const filtro = filtroSel ? filtroSel.value : '';
-  const filas = filtro ? progHistorialData.filter(p => p.maquina_codigo === filtro) : progHistorialData;
+  const desdeSel = document.getElementById('progHistDesde');
+  const hastaSel = document.getElementById('progHistHasta');
+  const desde = desdeSel ? desdeSel.value : '';
+  const hasta = hastaSel ? hastaSel.value : '';
+
+  let filas = progHistorialData;
+  if (filtro) filas = filas.filter(p => p.maquina_codigo === filtro);
+  if (desde) filas = filas.filter(p => p.fecha >= desde);
+  if (hasta) filas = filas.filter(p => p.fecha <= hasta);
 
   const mapaMaquinas = {};
   progMaquinas.forEach(m => { mapaMaquinas[m.codigo] = m; });
@@ -1106,6 +1125,15 @@ function renderizarHistorialProg() {
         <option value="">Todas las máquinas</option>
         ${progMaquinas.map(m => `<option value="${esc(m.codigo)}" ${filtro === m.codigo ? 'selected' : ''}>${esc(m.codigo)} · ${esc(m.nombre)}</option>`).join('')}
       </select>
+      <div class="prog-field" style="margin:0;">
+        <label>Desde</label>
+        <input type="date" id="progHistDesde" value="${esc(desde)}" onchange="renderizarHistorialProg()" />
+      </div>
+      <div class="prog-field" style="margin:0;">
+        <label>Hasta</label>
+        <input type="date" id="progHistHasta" value="${esc(hasta)}" onchange="renderizarHistorialProg()" />
+      </div>
+      ${(desde || hasta) ? '<button class="filtro-btn" onclick="progLimpiarFechasHistorial()">✕ Limpiar fechas</button>' : ''}
       <span style="font-size:12px;color:var(--text-dim);">${filas.length} visita${filas.length === 1 ? '' : 's'}</span>
     </div>`;
 
@@ -1136,6 +1164,14 @@ function renderizarHistorialProg() {
   cont.innerHTML = selectorHtml + `<div class="prog-tabla-wrap"><table class="prog-tabla"><thead><tr>
       <th>Fecha</th><th>Sector</th><th>Código</th><th>Nombre</th><th>Visita</th><th>Tipo de mantenimiento</th><th>Tareas</th><th>Registrado por</th>
     </tr></thead><tbody>${filasHtml || '<tr><td colspan="8" class="empty-state">Nada coincide con ese filtro.</td></tr>'}</tbody></table></div>`;
+}
+
+function progLimpiarFechasHistorial() {
+  const desdeSel = document.getElementById('progHistDesde');
+  const hastaSel = document.getElementById('progHistHasta');
+  if (desdeSel) desdeSel.value = '';
+  if (hastaSel) hastaSel.value = '';
+  renderizarHistorialProg();
 }
 
 // ── PESTAÑA OBSERVACIONES (todas las máquinas, con filtro de estado) ──
