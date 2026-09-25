@@ -198,6 +198,7 @@
     .filtros-modo { display:flex; gap:6px; }
     .filtro-btn { background:var(--bg-panel); border:1px solid var(--border); color:var(--text-muted); padding:7px 12px; border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
     .filtro-btn.active { background:var(--baja); border-color:var(--baja); color:#04202b; }
+    #btnSinStock.active { background:var(--alta); border-color:var(--alta); color:#fff; }
     .filtro-btn:hover:not(.active) { border-color:var(--border-light); }
 
     /* CELEBRACIÓN AL COMPLETAR */
@@ -466,6 +467,7 @@
   <div class="tab-content" id="tab-stock">
     <div class="filtros-bar">
       <input type="text" id="filtroStock" placeholder="🔎 Buscar por código, descripción o ubicación..." oninput="aplicarFiltroStock()">
+      <button class="filtro-btn" id="btnSinStock" onclick="toggleFiltroSinStock()">🚫 Sin stock (<span id="contadorSinStock">0</span>)</button>
       <div class="filtros-modo">
         <button class="filtro-btn active" data-sg="todas" onclick="setFiltroSubgrupo('todas')">Todas</button>
       </div>
@@ -497,6 +499,7 @@ let filtroTextoCompras = '';
 let inventario = [];
 let filtroStock = '';
 let filtroSubgrupoStock = 'todas';
+let filtroSinStock = false;
 
 
 const OPERARIOS = ["Agustín","Fernando","Marcos","Juan","Ariel","Héctor","Rogelio","Leonel","Germán","Javier","Brian","Tomi","Carlos","Alberto"];
@@ -571,6 +574,19 @@ async function cargarStock() {
   if (error) { toast('❌ Error cargando stock'); return; }
   inventario = data || [];
   poblarSubgruposStock();
+  actualizarContadorSinStock();
+  renderizarStock();
+}
+
+function actualizarContadorSinStock() {
+  const cant = inventario.filter(i => i.cantidad <= 0).length;
+  const el = document.getElementById('contadorSinStock');
+  if (el) el.textContent = cant;
+}
+
+function toggleFiltroSinStock() {
+  filtroSinStock = !filtroSinStock;
+  document.getElementById('btnSinStock').classList.toggle('active', filtroSinStock);
   renderizarStock();
 }
 
@@ -594,6 +610,7 @@ function aplicarFiltroStock() {
 
 function renderizarStock() {
   let filtrado = inventario;
+  if (filtroSinStock) filtrado = filtrado.filter(i => i.cantidad <= 0);
   if (filtroSubgrupoStock !== 'todas') filtrado = filtrado.filter(i => i.subgrupo === filtroSubgrupoStock);
   if (filtroStock) {
     filtrado = filtrado.filter(i =>
@@ -604,7 +621,7 @@ function renderizarStock() {
   }
   const tbody = document.getElementById('stockTbody');
   if (!filtrado.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Nada coincide</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${filtroSinStock ? 'No hay ítems sin stock 🎉' : 'Nada coincide'}</td></tr>`;
     return;
   }
   tbody.innerHTML = filtrado.map(i => `
@@ -648,6 +665,7 @@ async function moverStock(id, tipo) {
   if (error) { toast('❌ Error actualizando stock'); return; }
   await sb.from('inventario_movimientos').insert({ inventario_id: id, codigo: item.codigo, tipo, cantidad, autor: usuario });
   item.cantidad = nuevaCantidad;
+  actualizarContadorSinStock();
   renderizarStock();
   toast(tipo === 'ingreso' ? `✓ +${cantidad} ingresado` : `✓ -${cantidad} consumido`);
 }
